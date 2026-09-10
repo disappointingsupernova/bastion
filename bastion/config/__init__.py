@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from functools import lru_cache
 from pathlib import Path
 
 from pydantic import field_validator
@@ -145,9 +146,11 @@ class Settings(BaseSettings):
 _settings: Settings | None = None
 
 
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Return the cached Settings instance, creating it on first call."""
-    global _settings
-    if _settings is None:
-        _settings = Settings()  # type: ignore[call-arg]  # secret_key loaded from env/.env
-    return _settings
+    """Return the cached Settings instance.
+
+    lru_cache provides thread-safe singleton semantics — the function is called
+    at most once regardless of concurrent callers (fix #22).
+    """
+    return Settings()  # type: ignore[call-arg]  # secret_key loaded from env/.env
