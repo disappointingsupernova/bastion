@@ -49,7 +49,8 @@ def create_access_token(user_id: str, username: str, role: str) -> str:
         "iat": datetime.now(tz=UTC),
         "type": "access",
     }
-    return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
+    token: str = jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
+    return token
 
 
 def create_refresh_token(user_id: str) -> str:
@@ -62,13 +63,15 @@ def create_refresh_token(user_id: str) -> str:
         "iat": datetime.now(tz=UTC),
         "type": "refresh",
     }
-    return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
+    token: str = jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
+    return token
 
 
-def decode_token(token: str) -> dict:
+def decode_token(token: str) -> dict:  # type: ignore[type-arg]
     """Decode and validate a JWT token. Raises JWTError on failure."""
     settings = get_settings()
-    return jwt.decode(token, settings.secret_key, algorithms=[settings.jwt_algorithm])
+    result: dict = jwt.decode(token, settings.secret_key, algorithms=[settings.jwt_algorithm])
+    return result
 
 
 # ── TOTP ──────────────────────────────────────────────────────────────────────
