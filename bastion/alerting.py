@@ -82,6 +82,8 @@ async def _send_smtp(subject: str, body: str, severity: AlertSeverity, config: d
         log.warning("SMTP alert skipped — incomplete configuration")
         return
 
+    assert isinstance(from_addr, str)
+    assert isinstance(to_addr, str)
     msg = MIMEText(body)
     msg["Subject"] = f"[Bastion {severity.upper()}] {subject}"
     msg["From"] = from_addr
@@ -132,7 +134,7 @@ async def _send_slack(subject: str, body: str, severity: AlertSeverity, config: 
     emoji = {"info": ":information_source:", "warning": ":warning:", "critical": ":rotating_light:"}
     payload = {"text": f"{emoji.get(severity, '')} *[{severity.upper()}] {subject}*\n{body}"}
     async with httpx.AsyncClient() as client:
-        client.post(webhook_url, json=payload, timeout=10)
+        await client.post(webhook_url, json=payload, timeout=10)
 
 
 async def _send_pagerduty(subject: str, body: str, severity: AlertSeverity, config: dict) -> None:
