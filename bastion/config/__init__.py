@@ -53,6 +53,7 @@ class Settings(BaseSettings):
 
     # ── SSH CA ────────────────────────────────────────────────────────────────
     ca_key_path: Path = Path("/opt/bastion/ca/bastion_ca")
+    ca_key_passphrase: str | None = None  # Passphrase for the encrypted CA private key
     ssh_cert_validity_hours: int = 8
     krl_path: Path = Path("/opt/bastion/ca/krl")
 

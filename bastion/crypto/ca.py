@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,11 +20,29 @@ from bastion.models import CertSerial, CertStatus, SshCertificate
 
 log = get_logger(__name__)
 
+# Allowed characters in a certificate principal (Unix username rules)
+_PRINCIPAL_RE = re.compile(r"^[a-z_][a-z0-9_\-]{0,31}$")
+# Allowed characters in a key ID (alphanumeric, hyphens, underscores)
+_KEY_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
 
-def generate_ca_keypair(ca_key_path: Path) -> None:
-    """Generate an Ed25519 CA keypair and write to disk.
 
-    The private key is written with mode 0600, the public key with 0644.
+def _validate_principal(principal: str) -> str:
+    """Validate a certificate principal is a safe Unix username.
+
+    Raises ValueError if the principal contains unsafe characters.
+    """
+    if not _PRINCIPAL_RE.match(principal):
+        raise ValueError(
+            f"Invalid principal {principal!r} — must match Unix username rules"
+        )
+    return principal
+
+
+def generate_ca_keypair(ca_key_path: Path, passphrase: bytes) -> None:
+    """Generate an Ed25519 CA keypair and write to disk, encrypted with a passphrase.
+
+    The private key is encrypted with BestAvailableEncryption and written with
+    mode 0600. The public key is written with 0644.
     This should only be called once during initial setup.
     """
     ca_key_path.parent.mkdir(parents=True, exist_ok=True)
@@ -34,7 +53,7 @@ def generate_ca_keypair(ca_key_path: Path) -> None:
     private_pem = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.OpenSSH,
-        encryption_algorithm=serialization.NoEncryption(),
+        encryption_algorithm=serialization.BestAvailableEncryption(passphrase),
     )
     public_openssh = public_key.public_bytes(
         encoding=serialization.Encoding.OpenSSH,
@@ -52,10 +71,13 @@ def generate_ca_keypair(ca_key_path: Path) -> None:
 
 
 def _load_ca_private_key() -> Ed25519PrivateKey:
-    """Load the CA private key from disk."""
+    """Load the CA private key from disk, decrypting with the configured passphrase."""
     settings = get_settings()
     key_data = settings.ca_key_path.read_bytes()
-    return serialization.load_ssh_private_key(key_data, password=None)  # type: ignore[return-value]
+    passphrase = settings.ca_key_passphrase.encode() if settings.ca_key_passphrase else None
+    return serialization.load_ssh_private_key(  # type: ignore[return-value]
+        key_data, password=passphrase
+    )
 
 
 async def _next_serial(db: AsyncSession) -> int:
@@ -64,6 +86,24 @@ async def _next_serial(db: AsyncSession) -> int:
     db.add(entry)
     await db.flush()
     return entry.id
+
+
+def _validate_public_key(public_key_bytes: bytes) -> None:
+    """Validate that the submitted public key is a recognised OpenSSH key type.
+
+    Raises ValueError if the key does not start with a known OpenSSH key type prefix.
+    """
+    allowed_prefixes = (
+        b"ssh-ed25519 ",
+        b"ecdsa-sha2-nistp256 ",
+        b"ecdsa-sha2-nistp384 ",
+        b"ecdsa-sha2-nistp521 ",
+        b"ssh-rsa ",
+    )
+    if not any(public_key_bytes.startswith(p) for p in allowed_prefixes):
+        raise ValueError("Submitted public key is not a recognised OpenSSH key type")
+    if len(public_key_bytes) > 8192:
+        raise ValueError("Submitted public key exceeds maximum permitted size")
 
 
 async def issue_certificate(
@@ -83,6 +123,10 @@ async def issue_certificate(
     import subprocess
     import tempfile
 
+    # Validate all user-supplied values before they touch the shell
+    _validate_public_key(public_key_bytes)
+    validated_principals = [_validate_principal(p) for p in principals]
+
     settings = get_settings()
     hours = validity_hours or settings.ssh_cert_validity_hours
     serial = await _next_serial(db)
@@ -92,8 +136,12 @@ async def issue_certificate(
     valid_before_ts = now + (hours * 3600)
     valid_before = datetime.fromtimestamp(valid_before_ts, tz=UTC)
 
-    key_id = f"bastion-{username}-{serial}"
-    principals_str = ",".join(principals)
+    # key_id is internal — built from serial only, not from user input
+    key_id = f"bastion-{serial}"
+    if not _KEY_ID_RE.match(key_id):
+        raise ValueError(f"Generated key_id {key_id!r} contains unsafe characters")
+
+    principals_str = ",".join(validated_principals)
 
     with tempfile.TemporaryDirectory(prefix="bastion-cert-") as tmpdir:
         tmp = Path(tmpdir)
@@ -103,19 +151,15 @@ async def issue_certificate(
 
         cert_file = tmp / "user-cert.pub"
 
+        # All arguments are passed as a list — no shell interpolation
         result = subprocess.run(
             [
                 "ssh-keygen",
-                "-s",
-                str(settings.ca_key_path),
-                "-I",
-                key_id,
-                "-n",
-                principals_str,
-                "-V",
-                f"+{hours}h",
-                "-z",
-                str(serial),
+                "-s", str(settings.ca_key_path),
+                "-I", key_id,
+                "-n", principals_str,
+                "-V", f"+{hours}h",
+                "-z", str(serial),
                 str(pub_key_file),
             ],
             capture_output=True,
@@ -137,7 +181,7 @@ async def issue_certificate(
         user_id=user_id,
         serial=serial,
         key_id=key_id,
-        principals=json.dumps(principals),
+        principals=json.dumps(validated_principals),
         valid_after=valid_after,
         valid_before=valid_before,
         status=CertStatus.ACTIVE,
@@ -151,7 +195,7 @@ async def issue_certificate(
         user_id=user_id,
         serial=serial,
         key_id=key_id,
-        principals=principals,
+        principals=validated_principals,
         valid_hours=hours,
     )
     return cert_bytes, record
@@ -207,7 +251,6 @@ async def _rebuild_krl(db: AsyncSession) -> None:
     krl_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not serials:
-        # Create an empty KRL
         subprocess.run(
             ["ssh-keygen", "-k", "-f", str(krl_path), "-u"],
             input=b"",
@@ -216,7 +259,6 @@ async def _rebuild_krl(db: AsyncSession) -> None:
         )
         return
 
-    # Write serials to a temp file and build KRL
     import tempfile
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".serials", delete=False) as f:
@@ -226,12 +268,9 @@ async def _rebuild_krl(db: AsyncSession) -> None:
     try:
         subprocess.run(
             [
-                "ssh-keygen",
-                "-k",
-                "-f",
-                str(krl_path),
-                "-s",
-                str(settings.ca_key_path) + ".pub",
+                "ssh-keygen", "-k",
+                "-f", str(krl_path),
+                "-s", str(settings.ca_key_path) + ".pub",
                 serial_file,
             ],
             capture_output=True,
