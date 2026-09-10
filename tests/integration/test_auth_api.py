@@ -109,14 +109,14 @@ class TestProtectedEndpoints:
     """Tests that protected endpoints reject unauthenticated requests."""
 
     async def test_sessions_requires_auth(self, api_client: AsyncClient):
-        """GET /sessions/ must return 403 without a token."""
+        """GET /sessions/ must return 401 without a token."""
         response = await api_client.get("/sessions/")
-        assert response.status_code == 403
+        assert response.status_code == 401
 
     async def test_cert_issue_requires_auth(self, api_client: AsyncClient):
-        """POST /auth/cert/issue must return 403 without a token."""
+        """POST /auth/cert/issue must return 401 without a token."""
         response = await api_client.post(
             "/auth/cert/issue",
             json={"public_key": "ssh-ed25519 AAAA test"},
         )
-        assert response.status_code == 403
+        assert response.status_code == 401

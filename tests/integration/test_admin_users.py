@@ -73,7 +73,7 @@ class TestCreateUser:
         assert response.status_code == 403
 
     async def test_unauthenticated_request_rejected(self, admin_client: AsyncClient):
-        """An unauthenticated request must return 403."""
+        """An unauthenticated request must return 401."""
         response = await admin_client.post(
             "/users/",
             json={
@@ -82,7 +82,7 @@ class TestCreateUser:
                 "password": "password-123",
             },
         )
-        assert response.status_code == 403
+        assert response.status_code == 401
 
 
 @pytest.mark.asyncio
