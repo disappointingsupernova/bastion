@@ -79,14 +79,14 @@ async def connect(
         )
 
     # Check access
-    result = await db.execute(
+    access_result = await db.execute(
         select(ServerAccess).where(
             ServerAccess.user_id == current_user.id,
             ServerAccess.server_id == server.id,
             ServerAccess.revoked_at.is_(None),
         )
     )
-    access = result.scalar_one_or_none()
+    access = access_result.scalar_one_or_none()
     if access is None:
         await audit(
             db,
