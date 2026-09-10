@@ -153,6 +153,23 @@ def connect(
         cert_file.write_text(cert)
         cert_file.chmod(0o600)
 
+        # Build a known_hosts file that trusts the Bastion CA for host verification.
+        # This replaces StrictHostKeyChecking=accept-new with a proper CA check (fix #15).
+        known_hosts_file = tmp / "known_hosts"
+        ca_pub_key_path = Path.home() / ".bastion" / "ca.pub"
+        if ca_pub_key_path.exists():
+            ca_pub_key = ca_pub_key_path.read_text().strip()
+            known_hosts_file.write_text(f"@cert-authority * {ca_pub_key}\n")
+        else:
+            # Fall back to accept-new if the CA public key has not been cached locally.
+            # Operators should distribute the CA public key to users via bastion-admin.
+            err_console.print(
+                "[yellow]Warning:[/yellow] Bastion CA public key not found at "
+                f"{ca_pub_key_path}. Host verification will use accept-new. "
+                "Run [bold]bastion fetch-ca[/bold] to cache the CA key."
+            )
+            known_hosts_file.write_text("")
+
         console.print(
             f"[green]→[/green] Connecting to [bold]{remote_user}@{hostname}[/bold]:{port}"
         )
@@ -161,14 +178,14 @@ def connect(
             "ssh",
             [
                 "ssh",
-                "-i",
-                str(key_path),
-                "-o",
-                f"CertificateFile={cert_file}",
-                "-o",
-                "StrictHostKeyChecking=accept-new",
-                "-p",
-                str(port),
+                "-i", str(key_path),
+                "-o", f"CertificateFile={cert_file}",
+                # Use the Bastion CA to verify host certificates (fix #15).
+                # StrictHostKeyChecking=yes with a CA-signed known_hosts entry
+                # prevents MITM on first connection.
+                "-o", f"UserKnownHostsFile={tmp / 'known_hosts'}",
+                "-o", "StrictHostKeyChecking=yes",
+                "-p", str(port),
                 f"{remote_user}@{hostname}",
             ],
         )
@@ -231,7 +248,11 @@ def cert(
         None, "--identity", "-i", help="Path to your SSH public key"
     ),
 ) -> None:
-    """Issue a new SSH certificate for your public key."""
+    """Issue a new SSH certificate and display its details.
+
+    The certificate is NOT written to disk permanently (fix #14).
+    Use 'bastion connect' to establish a session — it handles the cert ephemerally.
+    """
     pub_key_path = identity or Path.home() / ".ssh" / "id_ed25519.pub"
     if not pub_key_path.exists():
         err_console.print(f"[red]Public key not found:[/red] {pub_key_path}")
@@ -253,14 +274,13 @@ def cert(
         raise typer.Exit(1)
 
     data = response.json()
-    cert_path = pub_key_path.parent / (pub_key_path.stem + "-cert.pub")
-    cert_path.write_text(data["certificate"])
-    cert_path.chmod(0o600)
-
     console.print(
-        f"[green]✓[/green] Certificate issued — serial [bold]{data['serial']}[/bold], valid for [bold]{data['valid_hours']}h[/bold]"
+        f"[green]✓[/green] Certificate issued — serial [bold]{data['serial']}[/bold], "
+        f"valid for [bold]{data['valid_hours']}h[/bold]"
     )
-    console.print(f"  Saved to: {cert_path}")
+    console.print(
+        "  [dim]Certificate not written to disk. Use [bold]bastion connect[/bold] to connect.[/dim]"
+    )
 
 
 if __name__ == "__main__":
