@@ -47,13 +47,13 @@ async def _check_all_servers() -> None:
 
             async with get_db_session() as db:
                 for pkg in updates:
-                    result = await db.execute(
+                    pkg_result = await db.execute(
                         select(ServerPackage).where(
                             ServerPackage.server_id == server.id,
                             ServerPackage.package_name == pkg["name"],
                         )
                     )
-                    record = result.scalar_one_or_none()
+                    record: ServerPackage | None = pkg_result.scalar_one_or_none()
                     if record is None:
                         record = ServerPackage(
                             server_id=server.id,
