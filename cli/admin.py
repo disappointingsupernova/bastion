@@ -546,9 +546,15 @@ def packages_update(
 
 
 def _resolve_user_id(username: str) -> str:
-    """Resolve a username to a user ID via the API."""
+    """Resolve a username to a user ID via a targeted API lookup (fix #24).
+
+    Passes username as a filter parameter to avoid fetching all users.
+    """
     with _api_client() as client:
-        response = client.get("/users/", headers=_auth_headers())
+        response = client.get(
+            f"/users/?username={username}&limit=1",
+            headers=_auth_headers(),
+        )
     if response.status_code != 200:
         _handle_error(response)
     for u in response.json():
@@ -559,9 +565,15 @@ def _resolve_user_id(username: str) -> str:
 
 
 def _resolve_server_id(hostname: str) -> str:
-    """Resolve a hostname to a server ID via the API."""
+    """Resolve a hostname to a server ID via a targeted API lookup (fix #24).
+
+    Passes hostname as a filter parameter to avoid fetching all servers.
+    """
     with _api_client() as client:
-        response = client.get("/servers/", headers=_auth_headers())
+        response = client.get(
+            f"/servers/?hostname={hostname}&limit=1",
+            headers=_auth_headers(),
+        )
     if response.status_code != 200:
         _handle_error(response)
     for s in response.json():
