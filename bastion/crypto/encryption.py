@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 import subprocess
 from pathlib import Path
@@ -17,10 +18,24 @@ log = get_logger(__name__)
 
 # ── Fernet (secrets at rest) ──────────────────────────────────────────────────
 
+# Salt version tag — increment this if the derivation scheme ever changes,
+# which will invalidate all existing encrypted secrets (requiring re-encryption).
+_SALT_VERSION = b"bastion-fernet-v2"
+
 
 def _derive_fernet_key(secret_key: str) -> bytes:
-    """Derive a Fernet key from the application secret key using PBKDF2."""
-    salt = b"bastion-secret-v1"  # Fixed salt — key derivation only, not password hashing
+    """Derive a Fernet key from the application secret key using PBKDF2.
+
+    The salt is derived from SECRET_KEY itself via HMAC-SHA256, making it
+    unique per installation without requiring separate storage. This eliminates
+    the fixed-salt weakness while keeping the derivation deterministic.
+    """
+    # Derive a per-installation salt from the secret key — unique per deployment
+    salt = hashlib.hmac_digest(
+        secret_key.encode(),
+        _SALT_VERSION,
+        "sha256",
+    )
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
@@ -54,7 +69,9 @@ def encrypt_recording_age(plaintext_path: Path, age_public_key: str) -> Path:
     """Encrypt a session recording file using age with the configured public key.
 
     The encrypted file is written alongside the original with a .age extension.
-    The original plaintext file is securely deleted after encryption.
+    The original plaintext file is deleted after encryption. On modern filesystems
+    (SSD, CoW) overwrite-based erasure is not reliable; the primary protection is
+    age encryption — the plaintext is removed as promptly as possible.
     Returns the path to the encrypted file.
     """
     encrypted_path = plaintext_path.with_suffix(plaintext_path.suffix + ".age")
@@ -80,17 +97,26 @@ def encrypt_recording_age(plaintext_path: Path, age_public_key: str) -> Path:
         )
         raise RuntimeError(f"age encryption failed: {result.stderr.decode()}")
 
-    _secure_delete(plaintext_path)
+    _delete_plaintext(plaintext_path)
     log.info("Session recording encrypted", path=str(encrypted_path))
     return encrypted_path
 
 
-def _secure_delete(path: Path) -> None:
-    """Overwrite a file with random bytes before deletion to prevent recovery."""
-    size = path.stat().st_size
-    with open(path, "r+b") as f:
-        f.write(os.urandom(size))
-        f.flush()
-        os.fsync(f.fileno())
-    path.unlink()
-    log.debug("Plaintext file securely deleted", path=str(path))
+def _delete_plaintext(path: Path) -> None:
+    """Delete a plaintext recording file.
+
+    Note: on SSDs and CoW filesystems (btrfs, ZFS, APFS) overwriting bytes does
+    not guarantee erasure due to wear levelling and copy-on-write semantics.
+    The primary security control is age asymmetric encryption applied before
+    this deletion. We attempt a best-effort overwrite then unlink.
+    """
+    try:
+        size = path.stat().st_size
+        with open(path, "r+b") as f:
+            f.write(os.urandom(size))
+            f.flush()
+            os.fsync(f.fileno())
+    except OSError as exc:
+        log.warning("Could not overwrite plaintext recording before deletion", error=str(exc))
+    path.unlink(missing_ok=True)
+    log.debug("Plaintext recording deleted", path=str(path))
