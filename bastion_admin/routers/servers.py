@@ -310,7 +310,17 @@ async def reboot_server(
     db: Annotated[AsyncSession, Depends(get_db)],
     delay_seconds: int = 60,
 ) -> dict:
-    """Queue a reboot for the specified server."""
+    """Queue a reboot for the specified server.
+
+    delay_seconds must be between 60 and 3600 (fix #21).
+    """
+    from fastapi import Query
+
+    if not (60 <= delay_seconds <= 3600):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="delay_seconds must be between 60 and 3600.",
+        )
     from celery import current_app
 
     current_app.send_task(

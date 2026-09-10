@@ -169,6 +169,8 @@ async def list_sessions(
     offset: int = 0,
 ) -> list[SessionSummary]:
     """List the authenticated user's SSH sessions, most recent first."""
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
     result = await db.execute(
         select(Session, Server.hostname)
         .join(Server, Session.server_id == Server.id)

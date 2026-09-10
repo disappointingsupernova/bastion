@@ -44,6 +44,8 @@ async def list_audit_logs(
     offset: int = 0,
 ) -> list[AuditLogEntry]:
     """Query the audit log with optional filters."""
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
     query = select(AuditLog)
     if user_id:
         query = query.where(AuditLog.user_id == user_id)

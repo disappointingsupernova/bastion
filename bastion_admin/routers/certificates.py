@@ -54,6 +54,8 @@ async def list_certificates(
     offset: int = 0,
 ) -> list[CertSummary]:
     """List SSH certificates, optionally filtered by user or status."""
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
     query = select(SshCertificate)
     if user_id:
         query = query.where(SshCertificate.user_id == user_id)
