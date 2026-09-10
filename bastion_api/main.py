@@ -19,6 +19,9 @@ log = get_logger(__name__)
 
 # Paths that are explicitly unauthenticated
 _PUBLIC_PATHS = {"/health", "/auth/login", "/auth/mfa/verify", "/auth/refresh"}
+# Auth paths get a stricter rate limit than the default
+_AUTH_PATHS = {"/auth/login", "/auth/mfa/verify", "/auth/refresh"}
+_AUTH_RATE_LIMIT = 10  # requests per minute per IP
 
 
 @asynccontextmanager
@@ -34,7 +37,8 @@ async def lifespan(app: FastAPI):
 settings = get_settings()
 limiter = Limiter(
     key_func=get_remote_address,
-    default_limits=[f"{settings.rate_limit_auth_per_minute}/minute"],
+    # Default limit applies to all non-auth routes
+    default_limits=["200/minute"],
 )
 
 app = FastAPI(

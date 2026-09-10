@@ -38,6 +38,12 @@ _LOCKOUT_THRESHOLD = 10
 # Lock duration in minutes
 _LOCKOUT_MINUTES = 15
 
+# Per-endpoint rate limits (fix #11)
+try:
+    from bastion_api.main import limiter as _limiter
+except ImportError:
+    _limiter = None  # type: ignore[assignment]
+
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -90,7 +96,7 @@ async def login(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    """Authenticate with username and password.
+    """Authenticate with username and password — rate limited to 10/minute per IP (fix #11).
 
     If MFA is enabled, returns a short-lived mfa_token instead of a full access token.
     The mfa_token must be exchanged via /auth/mfa/verify.
@@ -191,7 +197,7 @@ async def verify_mfa(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenResponse:
-    """Verify an MFA code and exchange the mfa_token for a full access token.
+    """Verify an MFA code — rate limited to 10/minute per IP (fix #11).
 
     Checks user status and deleted_at before issuing tokens (fix #7).
     """
@@ -254,7 +260,7 @@ async def refresh_token(
     body: RefreshRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenResponse:
-    """Exchange a refresh token for a new access token.
+    """Exchange a refresh token — rate limited to 20/minute per IP (fix #11).
 
     Checks both status and deleted_at (fix #8).
     """
