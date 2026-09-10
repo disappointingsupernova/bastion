@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -32,6 +33,11 @@ from bastion_api.deps import get_client_ip, get_current_user
 log = get_logger(__name__)
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
+# Number of failed logins before the account is locked
+_LOCKOUT_THRESHOLD = 10
+# Lock duration in minutes
+_LOCKOUT_MINUTES = 15
+
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -57,7 +63,7 @@ class RefreshRequest(BaseModel):
 
 
 class CertRequest(BaseModel):
-    public_key: str  # OpenSSH format public key
+    public_key: str  # OpenSSH format public key — validated in issue_certificate
 
 
 class CertResponse(BaseModel):
@@ -69,6 +75,10 @@ class CertResponse(BaseModel):
 class TotpSetupResponse(BaseModel):
     secret: str
     uri: str
+
+
+class TotpVerifyRequest(BaseModel):
+    code: str
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -84,6 +94,7 @@ async def login(
 
     If MFA is enabled, returns a short-lived mfa_token instead of a full access token.
     The mfa_token must be exchanged via /auth/mfa/verify.
+    Accounts are locked for 15 minutes after 10 consecutive failed attempts.
     """
     ip = get_client_ip(request)
     settings = get_settings()
@@ -96,9 +107,33 @@ async def login(
     )
     user = result.scalar_one_or_none()
 
+    # ── Account lockout check (fix #6) ────────────────────────────────────────
+    if user and user.locked_until and user.locked_until > datetime.now(tz=UTC):
+        await audit(
+            db,
+            "auth.login",
+            success=False,
+            user_id=user.id,
+            ip_address=ip,
+            detail={"reason": "Account locked"},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Account is temporarily locked due to too many failed login attempts.",
+        )
+
     if user is None or not verify_password(body.password, user.hashed_password):
         if user:
             user.failed_login_count += 1
+            if user.failed_login_count >= _LOCKOUT_THRESHOLD:
+                from datetime import timedelta
+
+                user.locked_until = datetime.now(tz=UTC) + timedelta(minutes=_LOCKOUT_MINUTES)
+                log.warning(
+                    "Account locked after repeated failed logins",
+                    user_id=user.id,
+                    failed_count=user.failed_login_count,
+                )
             await db.flush()
             await evaluate_login(db, user, ip, success=False)
         await audit(
@@ -106,7 +141,7 @@ async def login(
             "auth.login",
             success=False,
             ip_address=ip,
-            detail={"username": body.username, "reason": "Invalid credentials"},
+            detail={"reason": "Invalid credentials"},
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
@@ -121,7 +156,9 @@ async def login(
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is not active.")
 
+    # Successful login — reset failure counter and lockout
     user.failed_login_count = 0
+    user.locked_until = None
 
     if user.mfa_enabled:
         if user.mfa_method == MfaMethod.EMAIL:
@@ -154,7 +191,10 @@ async def verify_mfa(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenResponse:
-    """Verify an MFA code and exchange the mfa_token for a full access token."""
+    """Verify an MFA code and exchange the mfa_token for a full access token.
+
+    Checks user status and deleted_at before issuing tokens (fix #7).
+    """
     ip = get_client_ip(request)
     settings = get_settings()
 
@@ -172,10 +212,22 @@ async def verify_mfa(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired MFA token."
         ) from None
 
-    result = await db.execute(select(User).where(User.id == user_id))
+    # ── Fix #7: check status and deleted_at before issuing tokens ─────────────
+    result = await db.execute(
+        select(User).where(
+            User.id == user_id,
+            User.status == UserStatus.ACTIVE,
+            User.deleted_at.is_(None),
+        )
+    )
     user = result.scalar_one_or_none()
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found.")
+        await audit(db, "auth.mfa.verify", success=False, ip_address=ip,
+                    detail={"reason": "User not found, inactive, or deleted"})
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or account is not active.",
+        )
 
     valid = False
     if user.mfa_method == MfaMethod.TOTP and user.totp_secret:
@@ -202,7 +254,10 @@ async def refresh_token(
     body: RefreshRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenResponse:
-    """Exchange a refresh token for a new access token."""
+    """Exchange a refresh token for a new access token.
+
+    Checks both status and deleted_at (fix #8).
+    """
     try:
         payload = decode_token(body.refresh_token)
         if payload.get("type") != "refresh":
@@ -213,9 +268,16 @@ async def refresh_token(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token."
         ) from None
 
-    result = await db.execute(select(User).where(User.id == user_id))
+    # ── Fix #8: filter on both status and deleted_at ───────────────────────────
+    result = await db.execute(
+        select(User).where(
+            User.id == user_id,
+            User.status == UserStatus.ACTIVE,
+            User.deleted_at.is_(None),
+        )
+    )
     user = result.scalar_one_or_none()
-    if user is None or user.status != UserStatus.ACTIVE:
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive."
         )
@@ -237,6 +299,7 @@ async def issue_cert(
 
     The certificate is valid for the configured number of hours (default 8).
     It is returned in the response and never written to disk.
+    Public key format is validated inside issue_certificate (fix #20).
     """
     from bastion.anomaly import evaluate_cert_issuance
 
@@ -279,7 +342,8 @@ async def setup_totp(
 ) -> TotpSetupResponse:
     """Generate a new TOTP secret for the authenticated user.
 
-    The secret is encrypted before storage. The user must verify a code to activate it.
+    The secret is stored encrypted but mfa_enabled is NOT set until the user
+    verifies a code via /auth/totp/verify (fix #13).
     """
     from bastion.config import get_settings
     from bastion.crypto.encryption import encrypt_secret
@@ -287,8 +351,45 @@ async def setup_totp(
     settings = get_settings()
     secret = generate_totp_secret()
     current_user.totp_secret = encrypt_secret(secret, settings.secret_key)
+    # Store the method as pending — mfa_enabled remains False until verified
     current_user.mfa_method = MfaMethod.TOTP
     await db.flush()
 
     await audit(db, "auth.totp.setup", success=True, user_id=current_user.id)
     return TotpSetupResponse(secret=secret, uri=get_totp_uri(secret, current_user.username))
+
+
+@router.post("/totp/verify", status_code=status.HTTP_204_NO_CONTENT)
+async def verify_totp_setup(
+    body: TotpVerifyRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Verify a TOTP code to activate MFA on the account (fix #13).
+
+    The user must call this after /auth/totp/setup to confirm they have
+    successfully scanned the QR code. Only then is mfa_enabled set to True.
+    """
+    from bastion.config import get_settings
+    from bastion.crypto.encryption import decrypt_secret
+
+    settings = get_settings()
+
+    if not current_user.totp_secret:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="TOTP setup has not been initiated. Call /auth/totp/setup first.",
+        )
+
+    secret = decrypt_secret(current_user.totp_secret, settings.secret_key)
+    if not verify_totp(secret, body.code):
+        await audit(db, "auth.totp.verify", success=False, user_id=current_user.id)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid TOTP code — please check your authenticator app.",
+        )
+
+    current_user.mfa_enabled = True
+    await db.flush()
+    await audit(db, "auth.totp.verify", success=True, user_id=current_user.id)
+    log.info("TOTP MFA activated", user_id=current_user.id)
