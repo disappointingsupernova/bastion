@@ -152,7 +152,3 @@ All three must pass before merging to `main`.
 - `pydantic-settings` reads required fields (e.g. `secret_key`) from the environment at runtime — `Settings()` calls without arguments are correct and should be suppressed with `# type: ignore[call-arg]` if mypy complains.
 
 ---
-
-## Current Date
-
-Today's date is **10 September 2026**. Use this when generating dates, changelogs, or release notes.
