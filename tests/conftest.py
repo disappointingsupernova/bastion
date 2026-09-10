@@ -102,6 +102,75 @@ async def regular_user(db_session: AsyncSession):
     return user
 
 
+@pytest_asyncio.fixture
+async def auditor_user(db_session: AsyncSession):
+    """Create and return a test auditor user."""
+    from bastion.auth import hash_password
+    from bastion.models import User, UserRole, UserStatus
+
+    user = User(
+        username="testauditor",
+        email="testauditor@example.com",
+        hashed_password=hash_password("test-password-123"),
+        role=UserRole.AUDITOR,
+        status=UserStatus.ACTIVE,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    return user
+
+
+@pytest_asyncio.fixture
+async def read_only_user(db_session: AsyncSession):
+    """Create and return a test read-only user."""
+    from bastion.auth import hash_password
+    from bastion.models import User, UserRole, UserStatus
+
+    user = User(
+        username="testreadonly",
+        email="testreadonly@example.com",
+        hashed_password=hash_password("test-password-123"),
+        role=UserRole.READ_ONLY,
+        status=UserStatus.ACTIVE,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    return user
+
+
+@pytest_asyncio.fixture
+async def test_server(db_session: AsyncSession):
+    """Create and return a test server."""
+    from bastion.models import OsFamily, Server, ServerStatus
+
+    server = Server(
+        hostname="test.example.com",
+        display_name="Test Server",
+        ssh_port=22,
+        os_family=OsFamily.DEBIAN,
+        status=ServerStatus.ACTIVE,
+    )
+    db_session.add(server)
+    await db_session.flush()
+    return server
+
+
+@pytest_asyncio.fixture
+async def server_access(db_session: AsyncSession, regular_user, test_server):
+    """Grant regular_user access to test_server."""
+    from bastion.models import ServerAccess
+
+    access = ServerAccess(
+        user_id=regular_user.id,
+        server_id=test_server.id,
+        allow_sudo=False,
+        remote_username="testuser",
+    )
+    db_session.add(access)
+    await db_session.flush()
+    return access
+
+
 @pytest.fixture
 def admin_token(admin_user) -> str:
     """Return a valid JWT access token for the test admin user."""
@@ -116,3 +185,23 @@ def user_token(regular_user) -> str:
     from bastion.auth import create_access_token
 
     return create_access_token(regular_user.id, regular_user.username, regular_user.role.value)
+
+
+@pytest.fixture
+def auditor_token(auditor_user) -> str:
+    """Return a valid JWT access token for the test auditor user."""
+    from bastion.auth import create_access_token
+
+    return create_access_token(
+        auditor_user.id, auditor_user.username, auditor_user.role.value
+    )
+
+
+@pytest.fixture
+def read_only_token(read_only_user) -> str:
+    """Return a valid JWT access token for the test read-only user."""
+    from bastion.auth import create_access_token
+
+    return create_access_token(
+        read_only_user.id, read_only_user.username, read_only_user.role.value
+    )
