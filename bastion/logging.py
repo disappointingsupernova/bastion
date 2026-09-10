@@ -57,6 +57,7 @@ def configure_logging(service_name: str, debug: bool = False) -> None:
     )
 
 
-def get_logger(name: str) -> structlog.stdlib.BoundLogger:
+def get_logger(name: str) -> structlog.BoundLogger:
     """Return a bound structlog logger for the given name."""
-    return structlog.get_logger(name)
+    logger: structlog.BoundLogger = structlog.get_logger(name)  # type: ignore[assignment]
+    return logger
