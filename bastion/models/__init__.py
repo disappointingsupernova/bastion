@@ -1,0 +1,308 @@
+"""ORM models for the Bastion service."""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from enum import Enum
+from typing import Optional
+
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from bastion.db import Base
+
+
+def _uuid() -> str:
+    return str(uuid.uuid4())
+
+
+# ── Enumerations ──────────────────────────────────────────────────────────────
+
+class UserRole(str, Enum):
+    ADMIN = "admin"
+    USER = "user"
+    AUDITOR = "auditor"
+    READ_ONLY = "read_only"
+
+
+class UserStatus(str, Enum):
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    DELETED = "deleted"
+
+
+class ServerStatus(str, Enum):
+    ACTIVE = "active"
+    UNREACHABLE = "unreachable"
+    MAINTENANCE = "maintenance"
+    DELETED = "deleted"
+
+
+class SessionStatus(str, Enum):
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    TERMINATED = "terminated"
+    REVOKED = "revoked"
+
+
+class CertStatus(str, Enum):
+    ACTIVE = "active"
+    EXPIRED = "expired"
+    REVOKED = "revoked"
+
+
+class AlertChannel(str, Enum):
+    EMAIL = "email"
+    SES = "ses"
+    SLACK = "slack"
+    PAGERDUTY = "pagerduty"
+    PUSHOVER = "pushover"
+
+
+class AlertSeverity(str, Enum):
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
+class MfaMethod(str, Enum):
+    TOTP = "totp"
+    EMAIL = "email"
+
+
+class OsFamily(str, Enum):
+    DEBIAN = "debian"
+    RHEL = "rhel"
+    UNKNOWN = "unknown"
+
+
+# ── Mixins ────────────────────────────────────────────────────────────────────
+
+class TimestampMixin:
+    """Adds created_at and updated_at columns to a model."""
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+# ── Models ────────────────────────────────────────────────────────────────────
+
+class User(TimestampMixin, Base):
+    """A Bastion user account."""
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[Optional[str]] = mapped_column(String(255))
+    role: Mapped[UserRole] = mapped_column(String(32), nullable=False, default=UserRole.USER)
+    status: Mapped[UserStatus] = mapped_column(String(32), nullable=False, default=UserStatus.ACTIVE)
+    mfa_method: Mapped[Optional[MfaMethod]] = mapped_column(String(16))
+    totp_secret: Mapped[Optional[str]] = mapped_column(String(255))  # Encrypted at rest
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    unix_uid: Mapped[Optional[int]] = mapped_column(Integer)
+    ssh_public_key: Mapped[Optional[str]] = mapped_column(Text)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_login_ip: Mapped[Optional[str]] = mapped_column(String(45))
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    certificates: Mapped[list["SshCertificate"]] = relationship(back_populates="user")
+    sessions: Mapped[list["Session"]] = relationship(back_populates="user")
+    server_access: Mapped[list["ServerAccess"]] = relationship(back_populates="user")
+    audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="user")
+    mfa_codes: Mapped[list["MfaCode"]] = relationship(back_populates="user")
+
+
+class Server(TimestampMixin, Base):
+    """A remote server managed by Bastion."""
+    __tablename__ = "servers"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    hostname: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    display_name: Mapped[Optional[str]] = mapped_column(String(255))
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45))
+    ssh_port: Mapped[int] = mapped_column(Integer, default=22, nullable=False)
+    os_family: Mapped[OsFamily] = mapped_column(String(32), default=OsFamily.UNKNOWN, nullable=False)
+    os_version: Mapped[Optional[str]] = mapped_column(String(128))
+    status: Mapped[ServerStatus] = mapped_column(String(32), default=ServerStatus.ACTIVE, nullable=False)
+    tags: Mapped[Optional[str]] = mapped_column(Text)  # JSON array of tag strings
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_check_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # Proxy jump support
+    proxy_jump_server_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("servers.id"), nullable=True
+    )
+    # SSH hardening applied
+    hardening_applied: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    proxy_jump_server: Mapped[Optional["Server"]] = relationship("Server", remote_side="Server.id")
+    sessions: Mapped[list["Session"]] = relationship(back_populates="server")
+    server_access: Mapped[list["ServerAccess"]] = relationship(back_populates="server")
+    packages: Mapped[list["ServerPackage"]] = relationship(back_populates="server")
+
+
+class ServerAccess(TimestampMixin, Base):
+    """Grants a user access to a specific server, with optional sudo."""
+    __tablename__ = "server_access"
+    __table_args__ = (UniqueConstraint("user_id", "server_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    server_id: Mapped[str] = mapped_column(String(36), ForeignKey("servers.id"), nullable=False)
+    allow_sudo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    remote_username: Mapped[Optional[str]] = mapped_column(String(64))  # Unix account on remote
+    provisioned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    provisioned_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped["User"] = relationship(back_populates="server_access")
+    server: Mapped["Server"] = relationship(back_populates="server_access")
+
+
+class SshCertificate(TimestampMixin, Base):
+    """An SSH certificate issued by the Bastion CA."""
+    __tablename__ = "ssh_certificates"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    serial: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    key_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    principals: Mapped[str] = mapped_column(Text, nullable=False)  # JSON array
+    valid_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    valid_before: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[CertStatus] = mapped_column(String(32), default=CertStatus.ACTIVE, nullable=False)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    revocation_reason: Mapped[Optional[str]] = mapped_column(String(255))
+    issued_from_ip: Mapped[Optional[str]] = mapped_column(String(45))
+
+    user: Mapped["User"] = relationship(back_populates="certificates")
+
+
+class Session(TimestampMixin, Base):
+    """An SSH session proxied through the Bastion."""
+    __tablename__ = "sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    server_id: Mapped[str] = mapped_column(String(36), ForeignKey("servers.id"), nullable=False)
+    certificate_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("ssh_certificates.id"))
+    status: Mapped[SessionStatus] = mapped_column(String(32), default=SessionStatus.ACTIVE, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    source_ip: Mapped[Optional[str]] = mapped_column(String(45))
+    remote_username: Mapped[Optional[str]] = mapped_column(String(64))
+    recording_path: Mapped[Optional[str]] = mapped_column(String(512))
+    recording_encrypted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    bytes_sent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    bytes_received: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    termination_reason: Mapped[Optional[str]] = mapped_column(String(255))
+
+    user: Mapped["User"] = relationship(back_populates="sessions")
+    server: Mapped["Server"] = relationship(back_populates="sessions")
+
+
+class AuditLog(TimestampMixin, Base):
+    """Immutable audit log entry for every action in the system."""
+    __tablename__ = "audit_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    action: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    resource_type: Mapped[Optional[str]] = mapped_column(String(64))
+    resource_id: Mapped[Optional[str]] = mapped_column(String(36))
+    detail: Mapped[Optional[str]] = mapped_column(Text)  # JSON
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45))
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    node_id: Mapped[Optional[str]] = mapped_column(String(64))
+
+    user: Mapped[Optional["User"]] = relationship(back_populates="audit_logs")
+
+
+class MfaCode(TimestampMixin, Base):
+    """A time-limited email MFA code."""
+    __tablename__ = "mfa_codes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="mfa_codes")
+
+
+class AnomalyEvent(TimestampMixin, Base):
+    """A detected anomaly event with a heuristic risk score."""
+    __tablename__ = "anomaly_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    server_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("servers.id"), nullable=True)
+    session_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("sessions.id"), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    score: Mapped[int] = mapped_column(Integer, nullable=False)  # 0–100
+    detail: Mapped[Optional[str]] = mapped_column(Text)  # JSON
+    alerted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class AlertConfig(TimestampMixin, Base):
+    """Alert channel configuration stored in the database."""
+    __tablename__ = "alert_configs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    channel: Mapped[AlertChannel] = mapped_column(String(32), unique=True, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    config_json: Mapped[Optional[str]] = mapped_column(Text)  # Encrypted JSON of channel config
+    min_severity: Mapped[AlertSeverity] = mapped_column(String(32), default=AlertSeverity.WARNING, nullable=False)
+
+
+class SystemSetting(TimestampMixin, Base):
+    """Key-value store for system-wide settings managed via the admin API."""
+    __tablename__ = "system_settings"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    value: Mapped[Optional[str]] = mapped_column(Text)
+    description: Mapped[Optional[str]] = mapped_column(String(512))
+    encrypted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class ServerPackage(TimestampMixin, Base):
+    """A package tracked on a remote server."""
+    __tablename__ = "server_packages"
+    __table_args__ = (UniqueConstraint("server_id", "package_name"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    server_id: Mapped[str] = mapped_column(String(36), ForeignKey("servers.id"), nullable=False)
+    package_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    installed_version: Mapped[Optional[str]] = mapped_column(String(128))
+    available_version: Mapped[Optional[str]] = mapped_column(String(128))
+    update_available: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    server: Mapped["Server"] = relationship(back_populates="packages")
+
+
+class CertSerial(Base):
+    """Monotonically increasing certificate serial number counter."""
+    __tablename__ = "cert_serials"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
