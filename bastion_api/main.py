@@ -12,19 +12,20 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from bastion.config import get_settings
-from bastion.db import create_all_tables
 from bastion.logging import configure_logging, get_logger
 from bastion_api.routers import auth, sessions
 
 log = get_logger(__name__)
 
+# Paths that are explicitly unauthenticated
+_PUBLIC_PATHS = {"/health", "/auth/login", "/auth/mfa/verify", "/auth/refresh"}
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialise the database and CA on startup."""
+    """Initialise logging on startup. Table creation is left to Alembic migrations."""
     settings = get_settings()
     configure_logging("bastion-api", debug=settings.environment == "development")
-    await create_all_tables()
     log.info("Bastion API started", node_id=settings.node_id)
     yield
     log.info("Bastion API shutting down")
@@ -59,6 +60,27 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(sessions.router)
+
+
+@app.middleware("http")
+async def require_auth_middleware(request: Request, call_next):
+    """Global authentication safety net (fix #9).
+
+    Any route not in _PUBLIC_PATHS must carry a valid Bearer token.
+    Individual route dependencies enforce role-based access; this middleware
+    ensures that a route accidentally missing its dependency is still protected.
+    """
+    if request.url.path in _PUBLIC_PATHS or request.url.path == "/health":
+        return await call_next(request)
+
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": "Authentication required."},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return await call_next(request)
 
 
 @app.get("/health", include_in_schema=False)
