@@ -169,10 +169,10 @@ async def _provision_server(server_id: str, triggered_by_user_id: str) -> None:
                     ca_public_key=ca_pub_key,
                 )
                 async with get_db_session() as db:
-                    result = await db.execute(
+                    access_result = await db.execute(
                         select(ServerAccess).where(ServerAccess.id == access.id)
                     )
-                    a = result.scalar_one_or_none()
+                    a = access_result.scalar_one_or_none()
                     if a:
                         a.provisioned = True
                         a.provisioned_at = datetime.now(tz=UTC)
@@ -266,8 +266,10 @@ async def _provision_user_on_server(
             )
 
         async with get_db_session() as db:
-            result = await db.execute(select(ServerAccess).where(ServerAccess.id == access.id))
-            a = result.scalar_one_or_none()
+            access_result = await db.execute(
+                select(ServerAccess).where(ServerAccess.id == access.id)
+            )
+            a = access_result.scalar_one_or_none()
             if a:
                 a.provisioned = True
                 a.provisioned_at = datetime.now(tz=UTC)
