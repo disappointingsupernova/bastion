@@ -18,6 +18,18 @@ from bastion.models import Server, Session, SessionStatus, User
 log = get_logger(__name__)
 
 
+def _make_known_hosts(ca_pub_key_path: Path) -> asyncssh.SSHKnownHosts:
+    """Return an asyncssh known-hosts object that trusts the Bastion CA for all hosts.
+
+    This replaces known_hosts=None with CA-based host verification, preventing
+    MITM attacks while avoiding per-host key management.
+    """
+    ca_pub_key_text = ca_pub_key_path.read_text().strip()
+    # @cert-authority * means: trust any host certificate signed by this CA
+    known_hosts_text = f"@cert-authority * {ca_pub_key_text}\n"
+    return asyncssh.SSHKnownHosts(known_hosts_text)
+
+
 class AsciinemaRecorder:
     """Writes SSH I/O to an asciinema v2 format file."""
 
@@ -35,6 +47,14 @@ class AsciinemaRecorder:
         self._file.write(json.dumps(header) + "\n")
         self._file.flush()
 
+    def __enter__(self) -> "AsciinemaRecorder":
+        """Support use as a context manager."""
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        """Close the recording file on context manager exit."""
+        self.close()
+
     def write_output(self, data: bytes) -> None:
         """Record terminal output data."""
         elapsed = round(time.time() - self._start, 6)
@@ -44,8 +64,9 @@ class AsciinemaRecorder:
 
     def close(self) -> None:
         """Flush and close the recording file."""
-        self._file.flush()
-        self._file.close()
+        if not self._file.closed:
+            self._file.flush()
+            self._file.close()
         log.debug("Asciinema recording closed", path=str(self._path))
 
 
@@ -194,9 +215,16 @@ async def open_proxy_session(
 ) -> asyncssh.SSHClientConnection:
     """Open an SSH connection to the target server using the issued certificate.
 
+    Host verification uses the Bastion CA public key (@cert-authority) rather
+    than known_hosts=None, preventing MITM attacks on managed servers.
     Returns the asyncssh client connection for use in the proxy session.
     """
     import tempfile
+
+    from bastion.config import get_settings
+
+    settings = get_settings()
+    known_hosts = _make_known_hosts(settings.ca_key_path.with_suffix(".pub"))
 
     with tempfile.TemporaryDirectory(prefix="bastion-proxy-") as tmpdir:
         tmp = Path(tmpdir)
@@ -212,11 +240,10 @@ async def open_proxy_session(
         connect_kwargs: dict = {
             "username": remote_username,
             "client_keys": [str(key_file)],
-            "known_hosts": None,  # TODO: implement known_hosts verification
+            "known_hosts": known_hosts,
         }
 
         if server.proxy_jump_server_id:
-            # Proxy jump via an intermediate host
             from sqlalchemy import select
 
             async with get_db_session() as db:
@@ -232,7 +259,7 @@ async def open_proxy_session(
                     port=jump_server.ssh_port,
                     username=remote_username,
                     client_keys=[str(key_file)],
-                    known_hosts=None,
+                    known_hosts=known_hosts,
                 )
 
         conn = await asyncssh.connect(

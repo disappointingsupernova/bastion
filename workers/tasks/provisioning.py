@@ -46,16 +46,25 @@ def reboot_server(self, server_id: str, delay_seconds: int, triggered_by_user_id
 
 
 async def _get_server_connection(server):
-    """Open an asyncssh connection to a server using the bastion system key."""
+    """Open an asyncssh connection to a server using the bastion system key.
+
+    Host verification uses the Bastion CA public key (@cert-authority) rather
+    than disabling verification entirely.
+    """
     import asyncssh
 
     from bastion.config import get_settings
 
     settings = get_settings()
+    ca_pub_key_path = settings.ca_key_path.with_suffix(".pub")
+    ca_pub_key_text = ca_pub_key_path.read_text().strip()
+    known_hosts_text = f"@cert-authority * {ca_pub_key_text}\n"
+    known_hosts = asyncssh.SSHKnownHosts(known_hosts_text)
+
     connect_kwargs = {
         "username": "bastion",
         "client_keys": [str(settings.ca_key_path.parent / "bastion_host_key")],
-        "known_hosts": None,
+        "known_hosts": known_hosts,
     }
 
     if server.proxy_jump_server_id:
