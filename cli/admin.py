@@ -553,7 +553,7 @@ def _resolve_user_id(username: str) -> str:
         _handle_error(response)
     for u in response.json():
         if u["username"] == username:
-            return u["id"]
+            return str(u["id"])
     err_console.print(f"[red]Error:[/red] User '{username}' not found.")
     raise typer.Exit(1)
 
@@ -566,7 +566,7 @@ def _resolve_server_id(hostname: str) -> str:
         _handle_error(response)
     for s in response.json():
         if s["hostname"] == hostname:
-            return s["id"]
+            return str(s["id"])
     err_console.print(f"[red]Error:[/red] Server '{hostname}' not found.")
     raise typer.Exit(1)
 
