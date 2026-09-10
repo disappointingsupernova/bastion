@@ -55,7 +55,7 @@ def _load_ca_private_key() -> Ed25519PrivateKey:
     """Load the CA private key from disk."""
     settings = get_settings()
     key_data = settings.ca_key_path.read_bytes()
-    return serialization.load_ssh_private_key(key_data, password=None)
+    return serialization.load_ssh_private_key(key_data, password=None)  # type: ignore[return-value]
 
 
 async def _next_serial(db: AsyncSession) -> int:
