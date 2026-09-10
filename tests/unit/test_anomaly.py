@@ -32,7 +32,6 @@ from bastion.models import (
 )
 
 # Patch the threshold to 0 so any non-zero score triggers an event in tests
-_LOW_THRESHOLD = patch("bastion.anomaly.get_settings")
 
 
 def _settings_with_low_threshold():
