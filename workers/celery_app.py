@@ -12,7 +12,9 @@ log = get_logger(__name__)
 settings = get_settings()
 
 # Strip credentials from the Redis URL before logging (fix #30)
-_redis_url_safe = settings.redis_url.split("@")[-1] if "@" in settings.redis_url else settings.redis_url
+_redis_url_safe = (
+    settings.redis_url.split("@")[-1] if "@" in settings.redis_url else settings.redis_url
+)
 log.info("Celery broker configured", broker=f"redis://{_redis_url_safe}")
 
 app = Celery(

@@ -258,10 +258,7 @@ async def apply_updates(
         else:
             cmd = "DEBIAN_FRONTEND=noninteractive apt-get upgrade -y"
     elif os_family == "rhel":
-        if pkgs_arg:
-            cmd = f"yum update -y {pkgs_arg}"
-        else:
-            cmd = "yum update -y"
+        cmd = f"yum update -y {pkgs_arg}" if pkgs_arg else "yum update -y"
     else:
         raise ValueError(f"Unsupported OS family: {os_family}")
 

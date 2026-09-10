@@ -178,14 +178,19 @@ def connect(
             "ssh",
             [
                 "ssh",
-                "-i", str(key_path),
-                "-o", f"CertificateFile={cert_file}",
+                "-i",
+                str(key_path),
+                "-o",
+                f"CertificateFile={cert_file}",
                 # Use the Bastion CA to verify host certificates (fix #15).
                 # StrictHostKeyChecking=yes with a CA-signed known_hosts entry
                 # prevents MITM on first connection.
-                "-o", f"UserKnownHostsFile={tmp / 'known_hosts'}",
-                "-o", "StrictHostKeyChecking=yes",
-                "-p", str(port),
+                "-o",
+                f"UserKnownHostsFile={tmp / 'known_hosts'}",
+                "-o",
+                "StrictHostKeyChecking=yes",
+                "-p",
+                str(port),
                 f"{remote_user}@{hostname}",
             ],
         )

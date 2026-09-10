@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import os
 import subprocess
 from pathlib import Path
@@ -31,11 +32,11 @@ def _derive_fernet_key(secret_key: str) -> bytes:
     the fixed-salt weakness while keeping the derivation deterministic.
     """
     # Derive a per-installation salt from the secret key — unique per deployment
-    salt = hashlib.hmac_digest(
+    salt = hmac.new(
         secret_key.encode(),
         _SALT_VERSION,
-        "sha256",
-    )
+        digestmod="sha256",
+    ).digest()
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,

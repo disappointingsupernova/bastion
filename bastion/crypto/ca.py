@@ -32,9 +32,7 @@ def _validate_principal(principal: str) -> str:
     Raises ValueError if the principal contains unsafe characters.
     """
     if not _PRINCIPAL_RE.match(principal):
-        raise ValueError(
-            f"Invalid principal {principal!r} — must match Unix username rules"
-        )
+        raise ValueError(f"Invalid principal {principal!r} — must match Unix username rules")
     return principal
 
 
@@ -155,11 +153,16 @@ async def issue_certificate(
         result = subprocess.run(
             [
                 "ssh-keygen",
-                "-s", str(settings.ca_key_path),
-                "-I", key_id,
-                "-n", principals_str,
-                "-V", f"+{hours}h",
-                "-z", str(serial),
+                "-s",
+                str(settings.ca_key_path),
+                "-I",
+                key_id,
+                "-n",
+                principals_str,
+                "-V",
+                f"+{hours}h",
+                "-z",
+                str(serial),
                 str(pub_key_file),
             ],
             capture_output=True,
@@ -290,9 +293,12 @@ async def _rebuild_krl(db: AsyncSession) -> None:
     try:
         subprocess.run(
             [
-                "ssh-keygen", "-k",
-                "-f", str(krl_path),
-                "-s", str(settings.ca_key_path) + ".pub",
+                "ssh-keygen",
+                "-k",
+                "-f",
+                str(krl_path),
+                "-s",
+                str(settings.ca_key_path) + ".pub",
                 serial_file,
             ],
             capture_output=True,

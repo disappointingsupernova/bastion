@@ -228,8 +228,13 @@ async def verify_mfa(
     )
     user = result.scalar_one_or_none()
     if user is None:
-        await audit(db, "auth.mfa.verify", success=False, ip_address=ip,
-                    detail={"reason": "User not found, inactive, or deleted"})
+        await audit(
+            db,
+            "auth.mfa.verify",
+            success=False,
+            ip_address=ip,
+            detail={"reason": "User not found, inactive, or deleted"},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or account is not active.",

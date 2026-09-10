@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
 from datetime import UTC, datetime, timedelta
 
@@ -106,11 +107,11 @@ def _hash_code(code: str, user_id: str) -> str:
     Keying the hash to user_id means a precomputed table of all 900,000
     possible 6-digit codes cannot be used across users (fix #12).
     """
-    return hashlib.hmac_digest(
+    return hmac.new(
         user_id.encode(),
         code.encode(),
-        "sha256",
-    ).hex()
+        digestmod="sha256",
+    ).hexdigest()
 
 
 async def create_email_mfa_code(db: AsyncSession, user_id: str) -> str:
