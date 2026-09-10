@@ -148,5 +148,5 @@ def get_settings() -> Settings:
     """Return the cached Settings instance, creating it on first call."""
     global _settings
     if _settings is None:
-        _settings = Settings()
+        _settings = Settings()  # type: ignore[call-arg]  # secret_key loaded from env/.env
     return _settings
