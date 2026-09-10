@@ -47,7 +47,7 @@ class AsciinemaRecorder:
         self._file.write(json.dumps(header) + "\n")
         self._file.flush()
 
-    def __enter__(self) -> "AsciinemaRecorder":
+    def __enter__(self) -> AsciinemaRecorder:
         """Support use as a context manager."""
         return self
 

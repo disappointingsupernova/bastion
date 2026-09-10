@@ -314,7 +314,6 @@ async def reboot_server(
 
     delay_seconds must be between 60 and 3600 (fix #21).
     """
-    from fastapi import Query
 
     if not (60 <= delay_seconds <= 3600):
         raise HTTPException(
