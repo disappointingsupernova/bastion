@@ -100,23 +100,27 @@ def verify_totp(secret: str, code: str) -> bool:
 # ── Email MFA codes ───────────────────────────────────────────────────────────
 
 
-def _hash_code(code: str) -> str:
-    """Hash an MFA code for safe storage.
+def _hash_code(code: str, user_id: str) -> str:
+    """Hash an MFA code keyed to the user_id using HMAC-SHA256.
 
-    SHA-256 is appropriate here — MFA codes are short-lived 6-digit values
-    used only for single verification, not long-term password storage.
+    Keying the hash to user_id means a precomputed table of all 900,000
+    possible 6-digit codes cannot be used across users (fix #12).
     """
-    return hashlib.sha256(code.encode()).hexdigest()  # noqa: S324
+    return hashlib.hmac_digest(
+        user_id.encode(),
+        code.encode(),
+        "sha256",
+    ).hex()
 
 
 async def create_email_mfa_code(db: AsyncSession, user_id: str) -> str:
-    """Generate a 6-digit email MFA code, store its hash, and return the plaintext code."""
+    """Generate a 6-digit email MFA code, store its HMAC, and return the plaintext code."""
     settings = get_settings()
     code = str(secrets.randbelow(900_000) + 100_000)  # 100000–999999
     expires_at = datetime.now(tz=UTC) + timedelta(minutes=settings.mfa_email_code_expire_minutes)
     entry = MfaCode(
         user_id=user_id,
-        code_hash=_hash_code(code),
+        code_hash=_hash_code(code, user_id),
         expires_at=expires_at,
     )
     db.add(entry)
@@ -131,7 +135,7 @@ async def verify_email_mfa_code(db: AsyncSession, user_id: str, code: str) -> bo
     result = await db.execute(
         select(MfaCode).where(
             MfaCode.user_id == user_id,
-            MfaCode.code_hash == _hash_code(code),
+            MfaCode.code_hash == _hash_code(code, user_id),
             MfaCode.used == False,  # noqa: E712
             MfaCode.expires_at > now,
         )
