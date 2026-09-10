@@ -70,10 +70,18 @@ def require_role(*roles: UserRole):
 
 
 def get_client_ip(request: Request) -> str:
-    """Extract the client IP address from the request, respecting X-Forwarded-For."""
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
+    """Return the client IP address for audit logging.
+
+    Since both APIs are Unix-socket only, X-Forwarded-For can be set by any
+    local process and must not be trusted for security decisions. We record
+    the Unix socket peer identity instead, falling back to 'unix-socket'.
+    X-Forwarded-For is intentionally ignored (fix #10).
+    """
+    # Unix socket connections have no meaningful remote IP.
+    # Record a stable identifier so audit logs are not blank.
     if request.client:
-        return request.client.host
-    return "unknown"
+        host = request.client.host
+        # Loopback or abstract socket addresses are fine to record
+        if host and host not in ("", "unknown"):
+            return host
+    return "unix-socket"
