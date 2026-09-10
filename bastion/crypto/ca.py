@@ -221,6 +221,28 @@ async def revoke_certificate(
     cert.revocation_reason = reason
     await db.flush()
 
+    # Terminate any active sessions that were issued with this certificate (fix #26)
+    from bastion.models import Session, SessionStatus
+
+    session_result = await db.execute(
+        select(Session).where(
+            Session.certificate_id == cert_id,
+            Session.status == SessionStatus.ACTIVE,
+        )
+    )
+    active_sessions = session_result.scalars().all()
+    for session in active_sessions:
+        session.status = SessionStatus.REVOKED
+        session.ended_at = datetime.now(tz=UTC)
+        session.termination_reason = f"Certificate revoked: {reason}"
+        log.warning(
+            "Active session terminated due to certificate revocation",
+            session_id=session.id,
+            cert_id=cert_id,
+        )
+    if active_sessions:
+        await db.flush()
+
     await _rebuild_krl(db)
 
     log.info(
