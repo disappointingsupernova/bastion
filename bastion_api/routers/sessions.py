@@ -182,7 +182,7 @@ async def list_sessions(
         SessionSummary(
             id=s.id,
             server_hostname=hostname,
-            status=s.status.value,
+            status=str(s.status),
             started_at=s.started_at,
             ended_at=s.ended_at,
             bytes_sent=s.bytes_sent,
