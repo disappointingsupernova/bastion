@@ -78,14 +78,15 @@ class BastionSSHSession(asyncssh.SSHServerSession):
         self._command = command
         return True
 
-    def pty_requested(self, term_type: str, term_size: tuple, term_modes: dict) -> bool:
+    def pty_requested(  # type: ignore[override]
+        self, term_type: str, term_size: tuple, term_modes: object
+    ) -> bool:
         """Accept PTY requests and record terminal dimensions for the recording header."""
-        if self._recorder and len(term_size) >= 2:
-            # Re-open recorder with correct dimensions if PTY is requested first
+        if self._recorder and len(term_size) >= 2:  # type: ignore[arg-type]
             pass
         return True
 
-    async def session_started(self) -> None:
+    async def session_started(self) -> None:  # type: ignore[override]
         """Open a shell or exec on the target server once the session is established."""
         command = getattr(self, "_command", None)
         try:
@@ -107,7 +108,7 @@ class BastionSSHSession(asyncssh.SSHServerSession):
     async def _forward_output(self) -> None:
         """Forward output from the target server to the client, recording as we go."""
         try:
-            async for data in self._target_process.stdout:
+            async for data in self._target_process.stdout:  # type: ignore[union-attr]
                 if isinstance(data, str):
                     data = data.encode()
                 self._bytes_received += len(data)
@@ -119,7 +120,7 @@ class BastionSSHSession(asyncssh.SSHServerSession):
                 "Output forwarding ended", session_id=self._session_record.id, reason=str(exc)
             )
         finally:
-            exit_status = self._target_process.exit_status or 0
+            exit_status = self._target_process.exit_status or 0  # type: ignore[union-attr]
             self._chan.exit(exit_status)
             await self._finalise()
 
@@ -129,10 +130,11 @@ class BastionSSHSession(asyncssh.SSHServerSession):
         if self._target_process:
             self._target_process.stdin.write(data)
 
-    def eof_received(self) -> None:
+    def eof_received(self) -> bool:  # type: ignore[override]
         """Handle EOF from the client."""
         if self._target_process:
             self._target_process.stdin.write_eof()
+        return False
 
     async def _finalise(self) -> None:
         """Update the session record with final statistics and encrypt the recording."""
@@ -156,7 +158,10 @@ class BastionSSHSession(asyncssh.SSHServerSession):
                     from bastion.config import get_settings
 
                     settings = get_settings()
-                    recording_path = Path(self._session_record.recording_path)
+                    raw_path = self._session_record.recording_path
+                    if raw_path is None:
+                        return
+                    recording_path = Path(raw_path)
                     if settings.recordings_age_public_key and recording_path.exists():
                         try:
                             encrypted_path = encrypt_recording_age(
