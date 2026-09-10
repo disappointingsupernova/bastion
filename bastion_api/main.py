@@ -13,7 +13,8 @@ from slowapi.util import get_remote_address
 
 from bastion.config import get_settings
 from bastion.logging import configure_logging, get_logger
-from bastion_api.routers import auth, sessions
+from bastion_api.routers.auth import router as auth_router
+from bastion_api.routers.sessions import router as sessions_router
 
 log = get_logger(__name__)
 
@@ -62,8 +63,8 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-app.include_router(auth.router)
-app.include_router(sessions.router)
+app.include_router(auth_router)
+app.include_router(sessions_router)
 
 
 @app.middleware("http")

@@ -38,12 +38,6 @@ _LOCKOUT_THRESHOLD = 10
 # Lock duration in minutes
 _LOCKOUT_MINUTES = 15
 
-# Per-endpoint rate limits (fix #11)
-try:
-    from bastion_api.main import limiter as _limiter
-except ImportError:
-    _limiter = None  # type: ignore[assignment]
-
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
