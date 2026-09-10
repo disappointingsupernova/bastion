@@ -34,8 +34,8 @@ async def get_current_user(
     )
     try:
         payload = decode_token(credentials.credentials)
-        user_id: str = payload.get("sub")
-        token_type: str = payload.get("type")
+        user_id: str = payload.get("sub") or ""
+        token_type: str = payload.get("type") or ""
         if not user_id or token_type != "access":
             raise credentials_exception
     except JWTError:
