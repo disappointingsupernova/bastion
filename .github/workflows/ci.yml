@@ -95,7 +95,7 @@ jobs:
         run: pytest tests/ -v --tb=short --cov=bastion --cov=bastion_api --cov=bastion_admin --cov-report=xml
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         if: matrix.python-version == '3.11'
         with:
           files: coverage.xml
