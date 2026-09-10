@@ -101,8 +101,12 @@ def verify_totp(secret: str, code: str) -> bool:
 
 
 def _hash_code(code: str) -> str:
-    """Hash an MFA code for safe storage."""
-    return hashlib.sha256(code.encode()).hexdigest()
+    """Hash an MFA code for safe storage.
+
+    SHA-256 is appropriate here — MFA codes are short-lived 6-digit values
+    used only for single verification, not long-term password storage.
+    """
+    return hashlib.sha256(code.encode()).hexdigest()  # noqa: S324
 
 
 async def create_email_mfa_code(db: AsyncSession, user_id: str) -> str:
