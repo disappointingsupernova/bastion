@@ -1,6 +1,12 @@
 # Bastion
 
-A secure, auditable SSH bastion/jumphost service with a built-in certificate authority, session recording, remote server management, anomaly detection, and a fully API-driven architecture.
+> A secure, auditable SSH bastion/jumphost service with a built-in certificate authority, session recording, remote server management, anomaly detection, and a fully API-driven architecture.
+
+[![CI](https://github.com/disappointingsupernova/bastion/actions/workflows/ci.yml/badge.svg)](https://github.com/disappointingsupernova/bastion/actions/workflows/ci.yml)
+[![Security scan](https://github.com/disappointingsupernova/bastion/actions/workflows/security.yml/badge.svg)](https://github.com/disappointingsupernova/bastion/actions/workflows/security.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![Changelog](https://img.shields.io/badge/changelog-CHANGELOG.md-informational)](CHANGELOG.md)
 
 ---
 
@@ -12,7 +18,7 @@ A secure, auditable SSH bastion/jumphost service with a built-in certificate aut
 | [Installation](docs/installation.md) | Full installation guide for Ubuntu |
 | [Configuration](docs/configuration.md) | All environment variables and settings |
 | [API Reference](docs/api.md) | REST API endpoints for both services |
-| [CLI Reference](docs/cli.md) | `bastion` command-line tool usage |
+| [CLI Reference](docs/cli.md) | `bastion` and `bastion-admin` command-line tool usage |
 | [SSH CA & Certificates](docs/certificates.md) | How the CA works, cert lifecycle, and revocation |
 | [Session Recording](docs/recordings.md) | Recording format, encryption, and storage |
 | [Anomaly Detection](docs/anomaly.md) | Heuristic scoring and alerting |
@@ -37,49 +43,32 @@ Bastion is a self-hosted SSH bastion service designed to run on a dedicated Ubun
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Bastion Host                          │
-│                                                         │
-│  User (SSH) ──► bastion CLI ──► Unix Socket             │
-│                                    │                    │
-│                          ┌─────────┴──────────┐         │
-│                          │   bastion-api       │         │
-│                          │   (FastAPI/uvicorn) │         │
-│                          └─────────┬──────────┘         │
-│                                    │                    │
-│                          ┌─────────┴──────────┐         │
-│                          │  Shared Library     │         │
-│                          │  bastion/           │         │
-│                          │  ├── models         │         │
-│                          │  ├── crypto (CA)    │         │
-│                          │  ├── audit          │         │
-│                          │  ├── anomaly        │         │
-│                          │  └── provisioning   │         │
-│                          └─────────┬──────────┘         │
-│                                    │                    │
-│              ┌─────────────────────┼──────────────┐     │
-│              │                     │              │     │
-│         SQLite/Postgres         Redis          CA Keys  │
-│                                    │                    │
-│                          ┌─────────┴──────────┐         │
-│                          │  Celery Workers     │         │
-│                          │  ├── connectivity   │         │
-│                          │  ├── packages       │         │
-│                          │  ├── certificates   │         │
-│                          │  ├── alerts         │         │
-│                          │  └── recordings     │         │
-│                          └────────────────────┘         │
-│                                                         │
-│  Admin (SSH) ──► bastion-admin CLI ──► Unix Socket      │
-│                          │                              │
-│                  bastion-admin-api                      │
-│                  (FastAPI/uvicorn)                      │
-└─────────────────────────────────────────────────────────┘
-         │                              │
-         ▼                              ▼
-  Remote Server 1              Remote Server 2
-  (SSH via cert)               (SSH via cert + proxy jump)
+```mermaid
+graph TB
+    subgraph BastionHost["Bastion Host"]
+        U[User via SSH] -->|runs| CLI[bastion CLI]
+        A[Admin via SSH] -->|runs| ACLI[bastion-admin CLI]
+
+        CLI -->|HTTP over Unix socket| BAPI[bastion-api\nFastAPI / uvicorn]
+        ACLI -->|HTTP over Unix socket| AAPI[bastion-admin\nFastAPI / uvicorn]
+
+        BAPI --> LIB[Shared Library\nbastion/]
+        AAPI --> LIB
+
+        LIB --> DB[(SQLite / PostgreSQL)]
+        LIB --> REDIS[(Redis)]
+        LIB --> CA[CA Keys\n/opt/bastion/ca/]
+
+        BAPI -->|queues tasks| WORKER[Celery Workers]
+        AAPI -->|queues tasks| WORKER
+        WORKER --> REDIS
+        WORKER --> DB
+
+        BEAT[Celery Beat] -->|schedules| WORKER
+    end
+
+    BAPI -->|SSH proxy| R1[Remote Server 1]
+    BAPI -->|SSH proxy + jump| JUMP[Jump Host] --> R2[Remote Server 2]
 ```
 
 ---
@@ -128,19 +117,54 @@ Celery beat scheduler. Triggers periodic tasks on configured intervals.
 
 ## Authentication Flow
 
-```
-1. User runs: bastion login
-2. POST /auth/login → password verified → JWT issued (or mfa_token if MFA enabled)
-3. If MFA: POST /auth/mfa/verify → TOTP or email code verified → JWT issued
-4. User runs: bastion connect server1.example.com
-5. POST /sessions/connect → access checked → SSH cert issued → session record created
-6. CLI writes cert to tmpdir → exec ssh with cert → bastion proxies connection
-7. Session recorded in asciinema format → encrypted with age on completion
+```mermaid
+sequenceDiagram
+    actor User
+    participant CLI as bastion CLI
+    participant API as bastion-api
+    participant DB as Database
+    participant CA as SSH CA
+    participant Remote as Remote Server
+
+    User->>CLI: bastion login
+    CLI->>API: POST /auth/login
+    API->>DB: Verify password hash
+    alt MFA enabled
+        API-->>CLI: mfa_token
+        CLI->>User: Prompt for MFA code
+        User->>CLI: TOTP / email code
+        CLI->>API: POST /auth/mfa/verify
+        API->>DB: Verify code
+    end
+    API-->>CLI: access_token + refresh_token
+
+    User->>CLI: bastion connect server1.example.com
+    CLI->>API: POST /sessions/connect
+    API->>DB: Check access grant
+    API->>CA: Issue SSH certificate (8h)
+    API->>DB: Create session record
+    API-->>CLI: certificate + connection details
+    CLI->>Remote: exec ssh with cert
+    Note over CLI,Remote: Session proxied and recorded
 ```
 
 ---
 
 ## SSH Certificate Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active : Issued by CA
+    Active --> Expired : valid_before passed
+    Active --> Revoked : Admin revokes via API
+    Expired --> [*]
+    Revoked --> [*]
+
+    note right of Revoked
+        KRL rebuilt immediately
+        Distributed to remote servers
+    end note
+```
 
 1. User submits their Ed25519 public key to `/auth/cert/issue`
 2. Bastion CA signs it with an 8-hour validity window
@@ -166,7 +190,7 @@ On session completion:
 
 ```bash
 # On the bastion host, as root:
-git clone https://github.com/your-org/bastion /opt/bastion-src
+git clone https://github.com/disappointingsupernova/bastion /opt/bastion-src
 cd /opt/bastion-src
 bash scripts/install.sh
 
@@ -198,7 +222,7 @@ bastion connect server1.example.com
 │   │   └── provisioning.py # Remote server provisioning
 │   ├── bastion_api/      # User-facing FastAPI service
 │   ├── bastion_admin/    # Admin FastAPI service
-│   ├── cli/              # bastion CLI tool
+│   ├── cli/              # bastion and bastion-admin CLI tools
 │   ├── workers/          # Celery tasks
 │   ├── migrations/       # Alembic database migrations
 │   └── scripts/          # install.sh, update.sh
@@ -237,6 +261,43 @@ See [docs/security.md](docs/security.md) for the full security model.
 
 ## HA Mode
 
+```mermaid
+graph TB
+    subgraph Node1["Node 1"]
+        API1[bastion-api]
+        W1[Celery Worker]
+    end
+    subgraph Node2["Node 2"]
+        API2[bastion-api]
+        W2[Celery Worker]
+    end
+    subgraph Shared["Shared Infrastructure"]
+        PG[(PostgreSQL)]
+        REDIS[(Redis)]
+        S3[S3 / NFS\nRecordings]
+    end
+    API1 --> PG
+    API2 --> PG
+    W1 --> REDIS
+    W2 --> REDIS
+    W1 --> S3
+    W2 --> S3
+```
+
 Set `HA_MODE=true` and configure `DB_URL` to point to a shared PostgreSQL instance. All nodes are stateless — the database is the single source of truth. Session recordings must be offloaded to S3 or NFS when HA mode is enabled.
 
 See [docs/ha.md](docs/ha.md) for full HA deployment instructions.
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code standards, and the PR process.
+
+## Security
+
+To report a security vulnerability, see [SECURITY.md](SECURITY.md). Please do not open public issues for security bugs.
+
+## Licence
+
+[MIT](LICENSE) © [disappointingsupernova](https://github.com/disappointingsupernova)
