@@ -8,7 +8,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
-import bastion.models  # noqa: F401 — ensure all models are registered
+import bastion.models  # noqa: F401 — ensure all models are registered with SQLAlchemy metadata
 from bastion.config import get_settings
 from bastion.db import Base
 
