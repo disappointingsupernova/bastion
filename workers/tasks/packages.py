@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from workers.celery_app import app
 from bastion.logging import get_logger
+from workers.celery_app import app
 
 log = get_logger(__name__)
 
@@ -19,11 +19,12 @@ def check_all_servers(self) -> None:
 
 async def _check_all_servers() -> None:
     """Async implementation of the package update check."""
-    from bastion.db import get_db_session
-    from bastion.models import Server, ServerStatus, ServerPackage
-    from bastion.provisioning import get_available_updates
-    from sqlalchemy import select
     import asyncssh
+    from sqlalchemy import select
+
+    from bastion.db import get_db_session
+    from bastion.models import Server, ServerPackage, ServerStatus
+    from bastion.provisioning import get_available_updates
 
     async with get_db_session() as db:
         result = await db.execute(
@@ -60,9 +61,11 @@ async def _check_all_servers() -> None:
                         )
                         db.add(record)
                     record.available_version = pkg["available_version"]
-                    record.installed_version = pkg.get("installed_version") or record.installed_version
+                    record.installed_version = (
+                        pkg.get("installed_version") or record.installed_version
+                    )
                     record.update_available = True
-                    record.last_checked_at = datetime.now(tz=timezone.utc)
+                    record.last_checked_at = datetime.now(tz=UTC)
 
             log.info(
                 "Package update check completed",

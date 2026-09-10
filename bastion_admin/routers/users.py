@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Annotated, Optional
+from datetime import UTC, datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
@@ -16,7 +16,7 @@ from bastion.config import get_settings
 from bastion.db import get_db
 from bastion.logging import get_logger
 from bastion.models import MfaMethod, User, UserRole, UserStatus
-from bastion_api.deps import get_current_user, require_role
+from bastion_api.deps import require_role
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -28,29 +28,29 @@ class CreateUserRequest(BaseModel):
     username: str
     email: EmailStr
     password: str
-    full_name: Optional[str] = None
+    full_name: str | None = None
     role: UserRole = UserRole.USER
-    mfa_method: Optional[MfaMethod] = None
+    mfa_method: MfaMethod | None = None
 
 
 class UpdateUserRequest(BaseModel):
-    email: Optional[EmailStr] = None
-    full_name: Optional[str] = None
-    role: Optional[UserRole] = None
-    mfa_method: Optional[MfaMethod] = None
-    password: Optional[str] = None
+    email: EmailStr | None = None
+    full_name: str | None = None
+    role: UserRole | None = None
+    mfa_method: MfaMethod | None = None
+    password: str | None = None
 
 
 class UserResponse(BaseModel):
     id: str
     username: str
     email: str
-    full_name: Optional[str]
+    full_name: str | None
     role: str
     status: str
     mfa_enabled: bool
-    mfa_method: Optional[str]
-    last_login_at: Optional[datetime]
+    mfa_method: str | None
+    last_login_at: datetime | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -96,7 +96,9 @@ async def create_user(
     await db.flush()
 
     await audit(
-        db, "admin.user.create", success=True,
+        db,
+        "admin.user.create",
+        success=True,
         user_id=current_user.id,
         resource_type="user",
         resource_id=user.id,
@@ -108,7 +110,9 @@ async def create_user(
 
 @router.get("/", response_model=list[UserResponse])
 async def list_users(
-    current_user: Annotated[User, Depends(require_role(UserRole.ADMIN, UserRole.AUDITOR, UserRole.READ_ONLY))],
+    current_user: Annotated[
+        User, Depends(require_role(UserRole.ADMIN, UserRole.AUDITOR, UserRole.READ_ONLY))
+    ],
     db: Annotated[AsyncSession, Depends(get_db)],
     include_deleted: bool = False,
 ) -> list[UserResponse]:
@@ -123,7 +127,9 @@ async def list_users(
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
     user_id: str,
-    current_user: Annotated[User, Depends(require_role(UserRole.ADMIN, UserRole.AUDITOR, UserRole.READ_ONLY))],
+    current_user: Annotated[
+        User, Depends(require_role(UserRole.ADMIN, UserRole.AUDITOR, UserRole.READ_ONLY))
+    ],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserResponse:
     """Retrieve a single user by ID."""
@@ -142,9 +148,7 @@ async def update_user(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserResponse:
     """Update a user's details."""
-    result = await db.execute(
-        select(User).where(User.id == user_id, User.deleted_at.is_(None))
-    )
+    result = await db.execute(select(User).where(User.id == user_id, User.deleted_at.is_(None)))
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
@@ -162,7 +166,9 @@ async def update_user(
 
     await db.flush()
     await audit(
-        db, "admin.user.update", success=True,
+        db,
+        "admin.user.update",
+        success=True,
         user_id=current_user.id,
         resource_type="user",
         resource_id=user_id,
@@ -177,9 +183,7 @@ async def suspend_user(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Suspend a user account, preventing further logins."""
-    result = await db.execute(
-        select(User).where(User.id == user_id, User.deleted_at.is_(None))
-    )
+    result = await db.execute(select(User).where(User.id == user_id, User.deleted_at.is_(None)))
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
@@ -187,7 +191,9 @@ async def suspend_user(
     user.status = UserStatus.SUSPENDED
     await db.flush()
     await audit(
-        db, "admin.user.suspend", success=True,
+        db,
+        "admin.user.suspend",
+        success=True,
         user_id=current_user.id,
         resource_type="user",
         resource_id=user_id,
@@ -202,18 +208,18 @@ async def delete_user(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Soft-delete a user account."""
-    result = await db.execute(
-        select(User).where(User.id == user_id, User.deleted_at.is_(None))
-    )
+    result = await db.execute(select(User).where(User.id == user_id, User.deleted_at.is_(None)))
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
     user.status = UserStatus.DELETED
-    user.deleted_at = datetime.now(tz=timezone.utc)
+    user.deleted_at = datetime.now(tz=UTC)
     await db.flush()
     await audit(
-        db, "admin.user.delete", success=True,
+        db,
+        "admin.user.delete",
+        success=True,
         user_id=current_user.id,
         resource_type="user",
         resource_id=user_id,

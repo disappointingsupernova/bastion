@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 
-from workers.celery_app import app
 from bastion.logging import get_logger
+from workers.celery_app import app
 
 log = get_logger(__name__)
 
@@ -19,13 +19,14 @@ def dispatch_pending_anomaly_alerts(self) -> None:
 
 async def _dispatch_pending() -> None:
     """Async implementation of anomaly alert dispatch."""
-    from bastion.db import get_db_session
-    from bastion.models import AnomalyEvent, AlertSeverity
-    from bastion.alerting import dispatch_alert
-    from bastion.config import get_settings
     from sqlalchemy import select
 
-    settings = get_settings()
+    from bastion.alerting import dispatch_alert
+    from bastion.config import get_settings
+    from bastion.db import get_db_session
+    from bastion.models import AlertSeverity, AnomalyEvent
+
+    get_settings()
 
     async with get_db_session() as db:
         result = await db.execute(
@@ -38,11 +39,7 @@ async def _dispatch_pending() -> None:
             factors = detail.get("factors", [])
             source_ip = detail.get("source_ip", "unknown")
 
-            severity = (
-                AlertSeverity.CRITICAL
-                if event.score >= 80
-                else AlertSeverity.WARNING
-            )
+            severity = AlertSeverity.CRITICAL if event.score >= 80 else AlertSeverity.WARNING
 
             body_lines = [
                 f"Anomaly score: {event.score}/100",

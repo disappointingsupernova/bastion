@@ -57,9 +57,7 @@ class TestCreateUser:
         )
         assert response.status_code == 400
 
-    async def test_non_admin_cannot_create_user(
-        self, admin_client: AsyncClient, user_token: str
-    ):
+    async def test_non_admin_cannot_create_user(self, admin_client: AsyncClient, user_token: str):
         """A non-admin user must not be able to create users."""
         response = await admin_client.post(
             "/users/",

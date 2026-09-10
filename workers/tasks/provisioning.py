@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC
 
-from workers.celery_app import app
 from bastion.logging import get_logger
+from workers.celery_app import app
 
 log = get_logger(__name__)
 
@@ -28,7 +29,9 @@ def provision_user_on_server(self, server_id: str, user_id: str, triggered_by_us
 
 
 @app.task(name="workers.tasks.provisioning.deprovision_user_from_server", bind=True, max_retries=2)
-def deprovision_user_from_server(self, server_id: str, username: str, triggered_by_user_id: str) -> None:
+def deprovision_user_from_server(
+    self, server_id: str, username: str, triggered_by_user_id: str
+) -> None:
     """Remove a user account from a remote server."""
     asyncio.run(_deprovision_user_from_server(server_id, username, triggered_by_user_id))
 
@@ -41,9 +44,11 @@ def reboot_server(self, server_id: str, delay_seconds: int, triggered_by_user_id
 
 # ── Async implementations ─────────────────────────────────────────────────────
 
+
 async def _get_server_connection(server):
     """Open an asyncssh connection to a server using the bastion system key."""
     import asyncssh
+
     from bastion.config import get_settings
 
     settings = get_settings()
@@ -54,9 +59,10 @@ async def _get_server_connection(server):
     }
 
     if server.proxy_jump_server_id:
+        from sqlalchemy import select
+
         from bastion.db import get_db_session
         from bastion.models import Server
-        from sqlalchemy import select
 
         async with get_db_session() as db:
             result = await db.execute(
@@ -77,13 +83,15 @@ async def _get_server_connection(server):
 
 async def _provision_server(server_id: str, triggered_by_user_id: str) -> None:
     """Async implementation of full server provisioning."""
-    from bastion.db import get_db_session
-    from bastion.models import Server, ServerAccess, ServerStatus, User
-    from bastion.provisioning import apply_ssh_hardening, provision_user
+    from datetime import datetime
+
+    from sqlalchemy import select
+
     from bastion.audit import audit
     from bastion.config import get_settings
-    from sqlalchemy import select
-    from datetime import datetime, timezone
+    from bastion.db import get_db_session
+    from bastion.models import Server, ServerAccess, User
+    from bastion.provisioning import apply_ssh_hardening, provision_user
 
     settings = get_settings()
 
@@ -111,7 +119,9 @@ async def _provision_server(server_id: str, triggered_by_user_id: str) -> None:
         )
         async with get_db_session() as db:
             await audit(
-                db, "worker.provision.connect_failed", success=False,
+                db,
+                "worker.provision.connect_failed",
+                success=False,
                 user_id=triggered_by_user_id,
                 resource_type="server",
                 resource_id=server_id,
@@ -165,7 +175,7 @@ async def _provision_server(server_id: str, triggered_by_user_id: str) -> None:
                     a = result.scalar_one_or_none()
                     if a:
                         a.provisioned = True
-                        a.provisioned_at = datetime.now(tz=timezone.utc)
+                        a.provisioned_at = datetime.now(tz=UTC)
 
                 log.info(
                     "User provisioned on server",
@@ -183,7 +193,9 @@ async def _provision_server(server_id: str, triggered_by_user_id: str) -> None:
 
     async with get_db_session() as db:
         await audit(
-            db, "worker.provision.completed", success=True,
+            db,
+            "worker.provision.completed",
+            success=True,
             user_id=triggered_by_user_id,
             resource_type="server",
             resource_id=server_id,
@@ -197,15 +209,19 @@ async def _provision_server(server_id: str, triggered_by_user_id: str) -> None:
     )
 
 
-async def _provision_user_on_server(server_id: str, user_id: str, triggered_by_user_id: str) -> None:
+async def _provision_user_on_server(
+    server_id: str, user_id: str, triggered_by_user_id: str
+) -> None:
     """Async implementation of single-user provisioning."""
+    from datetime import datetime
+
+    from sqlalchemy import select
+
+    from bastion.audit import audit
+    from bastion.config import get_settings
     from bastion.db import get_db_session
     from bastion.models import Server, ServerAccess, User
     from bastion.provisioning import provision_user
-    from bastion.audit import audit
-    from bastion.config import get_settings
-    from sqlalchemy import select
-    from datetime import datetime, timezone
 
     settings = get_settings()
     ca_pub_key = settings.ca_key_path.with_suffix(".pub").read_text().strip()
@@ -250,16 +266,16 @@ async def _provision_user_on_server(server_id: str, user_id: str, triggered_by_u
             )
 
         async with get_db_session() as db:
-            result = await db.execute(
-                select(ServerAccess).where(ServerAccess.id == access.id)
-            )
+            result = await db.execute(select(ServerAccess).where(ServerAccess.id == access.id))
             a = result.scalar_one_or_none()
             if a:
                 a.provisioned = True
-                a.provisioned_at = datetime.now(tz=timezone.utc)
+                a.provisioned_at = datetime.now(tz=UTC)
 
             await audit(
-                db, "worker.provision.user.completed", success=True,
+                db,
+                "worker.provision.user.completed",
+                success=True,
                 user_id=triggered_by_user_id,
                 resource_type="server_access",
                 resource_id=access.id,
@@ -280,7 +296,9 @@ async def _provision_user_on_server(server_id: str, user_id: str, triggered_by_u
         )
         async with get_db_session() as db:
             await audit(
-                db, "worker.provision.user.failed", success=False,
+                db,
+                "worker.provision.user.failed",
+                success=False,
                 user_id=triggered_by_user_id,
                 resource_type="server_access",
                 resource_id=access.id,
@@ -288,13 +306,16 @@ async def _provision_user_on_server(server_id: str, user_id: str, triggered_by_u
             )
 
 
-async def _deprovision_user_from_server(server_id: str, username: str, triggered_by_user_id: str) -> None:
+async def _deprovision_user_from_server(
+    server_id: str, username: str, triggered_by_user_id: str
+) -> None:
     """Async implementation of user deprovisioning."""
+    from sqlalchemy import select
+
+    from bastion.audit import audit
     from bastion.db import get_db_session
     from bastion.models import Server
     from bastion.provisioning import deprovision_user
-    from bastion.audit import audit
-    from sqlalchemy import select
 
     async with get_db_session() as db:
         result = await db.execute(
@@ -313,7 +334,9 @@ async def _deprovision_user_from_server(server_id: str, username: str, triggered
 
         async with get_db_session() as db:
             await audit(
-                db, "worker.deprovision.user.completed", success=True,
+                db,
+                "worker.deprovision.user.completed",
+                success=True,
                 user_id=triggered_by_user_id,
                 resource_type="server",
                 resource_id=server_id,
@@ -332,11 +355,12 @@ async def _deprovision_user_from_server(server_id: str, username: str, triggered
 
 async def _reboot_server(server_id: str, delay_seconds: int, triggered_by_user_id: str) -> None:
     """Async implementation of server reboot."""
+    from sqlalchemy import select
+
+    from bastion.audit import audit
     from bastion.db import get_db_session
     from bastion.models import Server
     from bastion.provisioning import reboot_server
-    from bastion.audit import audit
-    from sqlalchemy import select
 
     async with get_db_session() as db:
         result = await db.execute(
@@ -355,7 +379,9 @@ async def _reboot_server(server_id: str, delay_seconds: int, triggered_by_user_i
 
         async with get_db_session() as db:
             await audit(
-                db, "worker.reboot.scheduled", success=True,
+                db,
+                "worker.reboot.scheduled",
+                success=True,
                 user_id=triggered_by_user_id,
                 resource_type="server",
                 resource_id=server_id,

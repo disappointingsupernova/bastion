@@ -6,7 +6,6 @@ import pytest
 
 from bastion.crypto.encryption import decrypt_secret, encrypt_secret, get_fernet
 
-
 SECRET_KEY = "test-secret-key-not-for-production-use-only-32chars"
 
 
@@ -35,6 +34,7 @@ class TestFernetEncryption:
     def test_wrong_key_raises_on_decrypt(self):
         """Decrypting with the wrong key must raise an exception."""
         from cryptography.fernet import InvalidToken
+
         token = encrypt_secret("secret", SECRET_KEY)
         with pytest.raises(InvalidToken):
             decrypt_secret(token, "wrong-key-also-long-enough-to-derive")

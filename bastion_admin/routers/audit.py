@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -21,12 +21,12 @@ _auditor_or_above = require_role(UserRole.ADMIN, UserRole.AUDITOR)
 
 class AuditLogEntry(BaseModel):
     id: str
-    user_id: Optional[str]
+    user_id: str | None
     action: str
-    resource_type: Optional[str]
-    resource_id: Optional[str]
-    detail: Optional[str]
-    ip_address: Optional[str]
+    resource_type: str | None
+    resource_id: str | None
+    detail: str | None
+    ip_address: str | None
     success: bool
     created_at: datetime
 
@@ -37,9 +37,9 @@ class AuditLogEntry(BaseModel):
 async def list_audit_logs(
     current_user: Annotated[User, Depends(_auditor_or_above)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    user_id: Optional[str] = None,
-    action: Optional[str] = None,
-    success: Optional[bool] = None,
+    user_id: str | None = None,
+    action: str | None = None,
+    success: bool | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[AuditLogEntry]:

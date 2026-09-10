@@ -50,7 +50,9 @@ async def health() -> dict:
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all handler — returns a generic 500 without leaking internal details."""
-    log.error("Unhandled exception in admin API", path=request.url.path, error=str(exc), exc_info=True)
+    log.error(
+        "Unhandled exception in admin API", path=request.url.path, error=str(exc), exc_info=True
+    )
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "An internal error occurred. Please contact your administrator."},

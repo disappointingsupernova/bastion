@@ -2,27 +2,26 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bastion.anomaly import evaluate_login
 from bastion.audit import audit
 from bastion.auth import (
     create_access_token,
-    create_refresh_token,
     create_email_mfa_code,
+    create_refresh_token,
     decode_token,
     generate_totp_secret,
     get_totp_uri,
-    hash_password,
     verify_email_mfa_code,
     verify_password,
     verify_totp,
 )
-from bastion.anomaly import evaluate_login
 from bastion.config import get_settings
 from bastion.crypto.ca import issue_certificate
 from bastion.db import get_db
@@ -35,6 +34,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
+
 
 class LoginRequest(BaseModel):
     username: str
@@ -73,6 +73,7 @@ class TotpSetupResponse(BaseModel):
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+
 @router.post("/login", response_model=dict)
 async def login(
     body: LoginRequest,
@@ -100,26 +101,38 @@ async def login(
             user.failed_login_count += 1
             await db.flush()
             await evaluate_login(db, user, ip, success=False)
-        await audit(db, "auth.login", success=False, ip_address=ip,
-                    detail={"username": body.username, "reason": "Invalid credentials"})
+        await audit(
+            db,
+            "auth.login",
+            success=False,
+            ip_address=ip,
+            detail={"username": body.username, "reason": "Invalid credentials"},
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
     if user.status != UserStatus.ACTIVE:
-        await audit(db, "auth.login", success=False, user_id=user.id, ip_address=ip,
-                    detail={"reason": "Account not active"})
+        await audit(
+            db,
+            "auth.login",
+            success=False,
+            user_id=user.id,
+            ip_address=ip,
+            detail={"reason": "Account not active"},
+        )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is not active.")
 
     user.failed_login_count = 0
 
     if user.mfa_enabled:
         if user.mfa_method == MfaMethod.EMAIL:
-            code = await create_email_mfa_code(db, user.id)
-            # In production this would be dispatched via the alerting module
+            await create_email_mfa_code(db, user.id)
             log.info("Email MFA code generated — dispatch via alerting", user_id=user.id)
 
         # Issue a short-lived MFA-pending token (5 minutes)
         import time
+
         from jose import jwt
+
         mfa_token = jwt.encode(
             {"sub": user.id, "type": "mfa_pending", "exp": int(time.time()) + 300},
             settings.secret_key,
@@ -147,12 +160,17 @@ async def verify_mfa(
 
     try:
         from jose import jwt
-        payload = jwt.decode(body.mfa_token, settings.secret_key, algorithms=[settings.jwt_algorithm])
+
+        payload = jwt.decode(
+            body.mfa_token, settings.secret_key, algorithms=[settings.jwt_algorithm]
+        )
         if payload.get("type") != "mfa_pending":
             raise ValueError("Invalid token type")
         user_id = payload["sub"]
     except Exception:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired MFA token.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired MFA token."
+        ) from None
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -162,6 +180,7 @@ async def verify_mfa(
     valid = False
     if user.mfa_method == MfaMethod.TOTP and user.totp_secret:
         from bastion.crypto.encryption import decrypt_secret
+
         secret = decrypt_secret(user.totp_secret, settings.secret_key)
         valid = verify_totp(secret, body.code)
     elif user.mfa_method == MfaMethod.EMAIL:
@@ -190,12 +209,16 @@ async def refresh_token(
             raise ValueError("Not a refresh token")
         user_id = payload["sub"]
     except Exception:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token."
+        ) from None
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None or user.status != UserStatus.ACTIVE:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive."
+        )
 
     return TokenResponse(
         access_token=create_access_token(user.id, user.username, user.role.value),
@@ -216,6 +239,7 @@ async def issue_cert(
     It is returned in the response and never written to disk.
     """
     from bastion.anomaly import evaluate_cert_issuance
+
     ip = get_client_ip(request)
 
     await evaluate_cert_issuance(db, current_user.id)
@@ -231,7 +255,9 @@ async def issue_cert(
     )
 
     await audit(
-        db, "cert.issue", success=True,
+        db,
+        "cert.issue",
+        success=True,
         user_id=current_user.id,
         resource_type="certificate",
         resource_id=record.id,

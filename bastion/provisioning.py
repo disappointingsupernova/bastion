@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
 
 import asyncssh
 
@@ -29,7 +28,9 @@ AuthorizedPrincipalsCommandUser nobody
 """
 
 
-async def _run(conn: asyncssh.SSHClientConnection, command: str, check: bool = True) -> asyncssh.SSHCompletedProcess:
+async def _run(
+    conn: asyncssh.SSHClientConnection, command: str, check: bool = True
+) -> asyncssh.SSHCompletedProcess:
     """Run a command on the remote server and return the result."""
     result = await conn.run(command, check=False)
     if check and result.returncode != 0:
@@ -43,7 +44,7 @@ async def _run(conn: asyncssh.SSHClientConnection, command: str, check: bool = T
 async def provision_user(
     conn: asyncssh.SSHClientConnection,
     username: str,
-    uid: Optional[int],
+    uid: int | None,
     allow_sudo: bool,
     ca_public_key: str,
 ) -> None:
@@ -144,11 +145,13 @@ async def get_available_updates(
         for line in result.stdout.strip().splitlines():
             parts = line.split("|")
             if len(parts) == 3:
-                packages.append({
-                    "name": parts[0],
-                    "available_version": parts[1],
-                    "installed_version": parts[2],
-                })
+                packages.append(
+                    {
+                        "name": parts[0],
+                        "available_version": parts[1],
+                        "installed_version": parts[2],
+                    }
+                )
         return packages
 
     elif os_family == "rhel":
@@ -160,11 +163,13 @@ async def get_available_updates(
         for line in result.stdout.strip().splitlines():
             parts = line.split("|")
             if len(parts) == 2:
-                packages.append({
-                    "name": parts[0],
-                    "available_version": parts[1],
-                    "installed_version": "",
-                })
+                packages.append(
+                    {
+                        "name": parts[0],
+                        "available_version": parts[1],
+                        "installed_version": "",
+                    }
+                )
         return packages
 
     log.warning("Unknown OS family — cannot check for updates", os_family=os_family)
@@ -174,7 +179,7 @@ async def get_available_updates(
 async def apply_updates(
     conn: asyncssh.SSHClientConnection,
     os_family: str,
-    package_names: Optional[list[str]] = None,
+    package_names: list[str] | None = None,
 ) -> str:
     """Apply available updates on the remote server.
 

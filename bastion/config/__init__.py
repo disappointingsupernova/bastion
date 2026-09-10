@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
-from typing import Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class DatabaseBackend(str, Enum):
+class DatabaseBackend(StrEnum):
     SQLITE = "sqlite"
     POSTGRES = "postgres"
 
 
-class StorageBackend(str, Enum):
+class StorageBackend(StrEnum):
     LOCAL = "local"
     S3 = "s3"
     NFS = "nfs"
@@ -61,25 +60,25 @@ class Settings(BaseSettings):
     recordings_enabled: bool = True
     recordings_path: Path = Path("/opt/bastion/recordings")
     recordings_storage: StorageBackend = StorageBackend.LOCAL
-    recordings_s3_bucket: Optional[str] = None
+    recordings_s3_bucket: str | None = None
     recordings_s3_prefix: str = "bastion/recordings/"
-    recordings_age_public_key: Optional[str] = None  # age public key for encryption
+    recordings_age_public_key: str | None = None  # age public key for encryption
 
     # ── Alerting ──────────────────────────────────────────────────────────────
-    smtp_host: Optional[str] = None
+    smtp_host: str | None = None
     smtp_port: int = 587
-    smtp_username: Optional[str] = None
-    smtp_password: Optional[str] = None
-    smtp_from_address: Optional[str] = None
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from_address: str | None = None
     smtp_use_tls: bool = True
 
-    ses_region: Optional[str] = None
-    ses_from_address: Optional[str] = None
+    ses_region: str | None = None
+    ses_from_address: str | None = None
 
-    slack_webhook_url: Optional[str] = None
-    pagerduty_integration_key: Optional[str] = None
-    pushover_app_token: Optional[str] = None
-    pushover_user_key: Optional[str] = None
+    slack_webhook_url: str | None = None
+    pagerduty_integration_key: str | None = None
+    pushover_app_token: str | None = None
+    pushover_user_key: str | None = None
 
     # ── 2FA ───────────────────────────────────────────────────────────────────
     totp_issuer: str = "Bastion"
@@ -96,12 +95,33 @@ class Settings(BaseSettings):
 
     # ── Excluded system users (cannot be bastion users) ───────────────────────
     excluded_system_users: list[str] = [
-        "root", "ubuntu", "debian", "ec2-user", "admin",
-        "nobody", "daemon", "bin", "sys", "sync", "games",
-        "man", "lp", "mail", "news", "uucp", "proxy",
-        "www-data", "backup", "list", "irc", "gnats",
-        "systemd-network", "systemd-resolve", "messagebus",
-        "sshd", "bastion",
+        "root",
+        "ubuntu",
+        "debian",
+        "ec2-user",
+        "admin",
+        "nobody",
+        "daemon",
+        "bin",
+        "sys",
+        "sync",
+        "games",
+        "man",
+        "lp",
+        "mail",
+        "news",
+        "uucp",
+        "proxy",
+        "www-data",
+        "backup",
+        "list",
+        "irc",
+        "gnats",
+        "systemd-network",
+        "systemd-resolve",
+        "messagebus",
+        "sshd",
+        "bastion",
     ]
 
     @field_validator("bastion_root", "ca_key_path", "krl_path", "recordings_path", mode="before")
@@ -121,7 +141,7 @@ class Settings(BaseSettings):
         return self.ha_mode
 
 
-_settings: Optional[Settings] = None
+_settings: Settings | None = None
 
 
 def get_settings() -> Settings:

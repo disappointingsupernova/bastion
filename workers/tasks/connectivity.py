@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from workers.celery_app import app
 from bastion.logging import get_logger
+from workers.celery_app import app
 
 log = get_logger(__name__)
 
@@ -19,12 +19,12 @@ def check_all_servers(self) -> None:
 
 async def _check_all_servers() -> None:
     """Async implementation of the connectivity check."""
-    from bastion.db import get_db_session
-    from bastion.models import Server, ServerStatus
-    from bastion.provisioning import check_connectivity
-    from bastion.alerting import dispatch_alert
-    from bastion.models import AlertSeverity
     from sqlalchemy import select
+
+    from bastion.alerting import dispatch_alert
+    from bastion.db import get_db_session
+    from bastion.models import AlertSeverity, Server, ServerStatus
+    from bastion.provisioning import check_connectivity
 
     async with get_db_session() as db:
         result = await db.execute(
@@ -38,18 +38,16 @@ async def _check_all_servers() -> None:
     for server in servers:
         reachable = await check_connectivity(server.hostname, server.ssh_port)
         async with get_db_session() as db:
-            result = await db.execute(
-                select(Server).where(Server.id == server.id)
-            )
+            result = await db.execute(select(Server).where(Server.id == server.id))
             s = result.scalar_one_or_none()
             if s is None:
                 continue
 
             previous_status = s.status
-            s.last_check_at = datetime.now(tz=timezone.utc)
+            s.last_check_at = datetime.now(tz=UTC)
 
             if reachable:
-                s.last_seen_at = datetime.now(tz=timezone.utc)
+                s.last_seen_at = datetime.now(tz=UTC)
                 if previous_status == ServerStatus.UNREACHABLE:
                     s.status = ServerStatus.ACTIVE
                     log.info("Server is reachable again", hostname=server.hostname)

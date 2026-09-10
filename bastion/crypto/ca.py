@@ -4,20 +4,18 @@ from __future__ import annotations
 
 import json
 import os
-import struct
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 
 from bastion.config import get_settings
 from bastion.logging import get_logger
-from bastion.models import CertSerial, SshCertificate, CertStatus
+from bastion.models import CertSerial, CertStatus, SshCertificate
 
 log = get_logger(__name__)
 
@@ -74,9 +72,9 @@ async def issue_certificate(
     username: str,
     public_key_bytes: bytes,
     principals: list[str],
-    validity_hours: Optional[int] = None,
-    issued_from_ip: Optional[str] = None,
-) -> tuple[bytes, "SshCertificate"]:
+    validity_hours: int | None = None,
+    issued_from_ip: str | None = None,
+) -> tuple[bytes, SshCertificate]:
     """Issue a signed SSH user certificate for the given public key.
 
     Returns the raw certificate bytes and the database record.
@@ -90,9 +88,9 @@ async def issue_certificate(
     serial = await _next_serial(db)
 
     now = int(time.time())
-    valid_after = datetime.fromtimestamp(now, tz=timezone.utc)
+    valid_after = datetime.fromtimestamp(now, tz=UTC)
     valid_before_ts = now + (hours * 3600)
-    valid_before = datetime.fromtimestamp(valid_before_ts, tz=timezone.utc)
+    valid_before = datetime.fromtimestamp(valid_before_ts, tz=UTC)
 
     key_id = f"bastion-{username}-{serial}"
     principals_str = ",".join(principals)
@@ -108,11 +106,16 @@ async def issue_certificate(
         result = subprocess.run(
             [
                 "ssh-keygen",
-                "-s", str(settings.ca_key_path),
-                "-I", key_id,
-                "-n", principals_str,
-                "-V", f"+{hours}h",
-                "-z", str(serial),
+                "-s",
+                str(settings.ca_key_path),
+                "-I",
+                key_id,
+                "-n",
+                principals_str,
+                "-V",
+                f"+{hours}h",
+                "-z",
+                str(serial),
                 str(pub_key_file),
             ],
             capture_output=True,
@@ -161,9 +164,7 @@ async def revoke_certificate(
     revoked_by_user_id: str,
 ) -> None:
     """Revoke a certificate by ID, update the KRL, and mark the DB record."""
-    result = await db.execute(
-        select(SshCertificate).where(SshCertificate.id == cert_id)
-    )
+    result = await db.execute(select(SshCertificate).where(SshCertificate.id == cert_id))
     cert = result.scalar_one_or_none()
     if cert is None:
         raise ValueError(f"Certificate {cert_id} not found")
@@ -172,7 +173,7 @@ async def revoke_certificate(
         return
 
     cert.status = CertStatus.REVOKED
-    cert.revoked_at = datetime.now(tz=timezone.utc)
+    cert.revoked_at = datetime.now(tz=UTC)
     cert.revocation_reason = reason
     await db.flush()
 
@@ -217,6 +218,7 @@ async def _rebuild_krl(db: AsyncSession) -> None:
 
     # Write serials to a temp file and build KRL
     import tempfile
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".serials", delete=False) as f:
         f.write("\n".join(f"serial:{s}" for s in serials))
         serial_file = f.name
@@ -224,9 +226,12 @@ async def _rebuild_krl(db: AsyncSession) -> None:
     try:
         subprocess.run(
             [
-                "ssh-keygen", "-k",
-                "-f", str(krl_path),
-                "-s", str(settings.ca_key_path) + ".pub",
+                "ssh-keygen",
+                "-k",
+                "-f",
+                str(krl_path),
+                "-s",
+                str(settings.ca_key_path) + ".pub",
                 serial_file,
             ],
             capture_output=True,

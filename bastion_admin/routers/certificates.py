@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Optional
 from datetime import datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -15,7 +15,7 @@ from bastion.crypto.ca import revoke_certificate
 from bastion.db import get_db
 from bastion.logging import get_logger
 from bastion.models import CertStatus, SshCertificate, User, UserRole
-from bastion_api.deps import get_current_user, require_role
+from bastion_api.deps import require_role
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/certificates", tags=["Certificates"])
@@ -33,8 +33,8 @@ class CertSummary(BaseModel):
     valid_after: datetime
     valid_before: datetime
     status: str
-    revoked_at: Optional[datetime]
-    revocation_reason: Optional[str]
+    revoked_at: datetime | None
+    revocation_reason: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -48,8 +48,8 @@ class RevokeRequest(BaseModel):
 async def list_certificates(
     current_user: Annotated[User, Depends(_admin_or_auditor)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    user_id: Optional[str] = None,
-    cert_status: Optional[CertStatus] = None,
+    user_id: str | None = None,
+    cert_status: CertStatus | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[CertSummary]:
@@ -75,10 +75,12 @@ async def revoke_cert(
     try:
         await revoke_certificate(db, cert_id, body.reason, current_user.id)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     await audit(
-        db, "admin.cert.revoke", success=True,
+        db,
+        "admin.cert.revoke",
+        success=True,
         user_id=current_user.id,
         resource_type="certificate",
         resource_id=cert_id,

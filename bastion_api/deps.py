@@ -39,7 +39,7 @@ async def get_current_user(
         if not user_id or token_type != "access":
             raise credentials_exception
     except JWTError:
-        raise credentials_exception
+        raise credentials_exception from None
 
     user = await get_active_user(db, user_id)
     if user is None:
@@ -51,6 +51,7 @@ async def get_current_user(
 
 def require_role(*roles: UserRole):
     """Return a dependency that enforces one of the given roles."""
+
     async def _check(user: Annotated[User, Depends(get_current_user)]) -> User:
         if user.role not in roles:
             log.warning(
@@ -64,6 +65,7 @@ def require_role(*roles: UserRole):
                 detail="You do not have permission to perform this action.",
             )
         return user
+
     return _check
 
 

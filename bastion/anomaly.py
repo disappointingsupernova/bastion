@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, time, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,14 +18,14 @@ log = get_logger(__name__)
 # Each factor contributes a score from 0–100. The final score is the sum,
 # capped at 100. Scores at or above the configured threshold trigger an alert.
 
-SCORE_FAILED_AUTH_BURST = 40       # ≥5 failed logins in 10 minutes
-SCORE_OFF_HOURS_LOGIN = 20         # Login between 22:00 and 06:00 UTC
-SCORE_NEW_SOURCE_IP = 25           # First time this IP has been seen for this user
-SCORE_CONCURRENT_SESSIONS = 30     # User has >3 concurrent active sessions
-SCORE_HIGH_DATA_TRANSFER = 35      # Session transferred >500 MB
-SCORE_RAPID_CERT_ISSUANCE = 45     # >3 certs issued in 5 minutes
+SCORE_FAILED_AUTH_BURST = 40  # ≥5 failed logins in 10 minutes
+SCORE_OFF_HOURS_LOGIN = 20  # Login between 22:00 and 06:00 UTC
+SCORE_NEW_SOURCE_IP = 25  # First time this IP has been seen for this user
+SCORE_CONCURRENT_SESSIONS = 30  # User has >3 concurrent active sessions
+SCORE_HIGH_DATA_TRANSFER = 35  # Session transferred >500 MB
+SCORE_RAPID_CERT_ISSUANCE = 45  # >3 certs issued in 5 minutes
 SCORE_REVOKED_CERT_USE_ATTEMPT = 80  # Attempt to use a revoked certificate
-SCORE_UNKNOWN_SERVER_ACCESS = 50   # Access attempt to a server not in the user's access list
+SCORE_UNKNOWN_SERVER_ACCESS = 50  # Access attempt to a server not in the user's access list
 
 
 async def evaluate_login(
@@ -34,14 +33,14 @@ async def evaluate_login(
     user: User,
     source_ip: str,
     success: bool,
-) -> Optional[AnomalyEvent]:
+) -> AnomalyEvent | None:
     """Evaluate a login event for anomalies. Returns an AnomalyEvent if the score exceeds the threshold."""
     score = 0
     factors: list[str] = []
 
     if not success:
         # Check for a burst of failed logins
-        window = datetime.now(tz=timezone.utc) - timedelta(minutes=10)
+        window = datetime.now(tz=UTC) - timedelta(minutes=10)
         result = await db.execute(
             select(func.count(AuditLog.id)).where(
                 AuditLog.user_id == user.id,
@@ -57,7 +56,7 @@ async def evaluate_login(
 
     if success:
         # Off-hours detection (UTC)
-        hour = datetime.now(tz=timezone.utc).hour
+        hour = datetime.now(tz=UTC).hour
         if hour >= 22 or hour < 6:
             score += SCORE_OFF_HOURS_LOGIN
             factors.append(f"Login outside business hours (UTC {hour:02d}:xx)")
@@ -95,7 +94,7 @@ async def evaluate_login(
 async def evaluate_session(
     db: AsyncSession,
     session: Session,
-) -> Optional[AnomalyEvent]:
+) -> AnomalyEvent | None:
     """Evaluate a completed session for data transfer anomalies."""
     score = 0
     factors: list[str] = []
@@ -108,7 +107,9 @@ async def evaluate_session(
 
     score = min(score, 100)
     return await _maybe_record(
-        db, score, factors,
+        db,
+        score,
+        factors,
         user_id=session.user_id,
         server_id=session.server_id,
         session_id=session.id,
@@ -118,11 +119,11 @@ async def evaluate_session(
 async def evaluate_cert_issuance(
     db: AsyncSession,
     user_id: str,
-) -> Optional[AnomalyEvent]:
+) -> AnomalyEvent | None:
     """Evaluate rapid certificate issuance for a user."""
     from bastion.models import SshCertificate
 
-    window = datetime.now(tz=timezone.utc) - timedelta(minutes=5)
+    window = datetime.now(tz=UTC) - timedelta(minutes=5)
     result = await db.execute(
         select(func.count(SshCertificate.id)).where(
             SshCertificate.user_id == user_id,
@@ -144,11 +145,11 @@ async def _maybe_record(
     db: AsyncSession,
     score: int,
     factors: list[str],
-    user_id: Optional[str] = None,
-    server_id: Optional[str] = None,
-    session_id: Optional[str] = None,
-    ip: Optional[str] = None,
-) -> Optional[AnomalyEvent]:
+    user_id: str | None = None,
+    server_id: str | None = None,
+    session_id: str | None = None,
+    ip: str | None = None,
+) -> AnomalyEvent | None:
     """Record an anomaly event if the score meets the threshold."""
     settings = get_settings()
     if score < settings.anomaly_score_alert_threshold:

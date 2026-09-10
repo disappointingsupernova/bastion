@@ -120,6 +120,7 @@ Example — adding a check for logins from a new country:
 ```python
 SCORE_NEW_COUNTRY = 30
 
+
 async def evaluate_login(db, user, source_ip, success):
     ...
     if success:

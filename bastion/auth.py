@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import pyotp
-from jose import JWTError, jwt
+from jose import jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +23,7 @@ BCRYPT_ROUNDS = 12
 
 # ── Password hashing ──────────────────────────────────────────────────────────
 
+
 def hash_password(plaintext: str) -> str:
     """Hash a plaintext password using bcrypt with a cost factor of 12."""
     return bcrypt.hashpw(plaintext.encode(), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode()
@@ -36,18 +36,17 @@ def verify_password(plaintext: str, hashed: str) -> bool:
 
 # ── JWT ───────────────────────────────────────────────────────────────────────
 
+
 def create_access_token(user_id: str, username: str, role: str) -> str:
     """Issue a signed JWT access token for the given user."""
     settings = get_settings()
-    expire = datetime.now(tz=timezone.utc) + timedelta(
-        minutes=settings.jwt_access_token_expire_minutes
-    )
+    expire = datetime.now(tz=UTC) + timedelta(minutes=settings.jwt_access_token_expire_minutes)
     payload = {
         "sub": user_id,
         "username": username,
         "role": role,
         "exp": expire,
-        "iat": datetime.now(tz=timezone.utc),
+        "iat": datetime.now(tz=UTC),
         "type": "access",
     }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
@@ -56,13 +55,11 @@ def create_access_token(user_id: str, username: str, role: str) -> str:
 def create_refresh_token(user_id: str) -> str:
     """Issue a signed JWT refresh token for the given user."""
     settings = get_settings()
-    expire = datetime.now(tz=timezone.utc) + timedelta(
-        days=settings.jwt_refresh_token_expire_days
-    )
+    expire = datetime.now(tz=UTC) + timedelta(days=settings.jwt_refresh_token_expire_days)
     payload = {
         "sub": user_id,
         "exp": expire,
-        "iat": datetime.now(tz=timezone.utc),
+        "iat": datetime.now(tz=UTC),
         "type": "refresh",
     }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
@@ -75,6 +72,7 @@ def decode_token(token: str) -> dict:
 
 
 # ── TOTP ──────────────────────────────────────────────────────────────────────
+
 
 def generate_totp_secret() -> str:
     """Generate a new TOTP secret key."""
@@ -98,6 +96,7 @@ def verify_totp(secret: str, code: str) -> bool:
 
 # ── Email MFA codes ───────────────────────────────────────────────────────────
 
+
 def _hash_code(code: str) -> str:
     """Hash an MFA code for safe storage."""
     return hashlib.sha256(code.encode()).hexdigest()
@@ -107,9 +106,7 @@ async def create_email_mfa_code(db: AsyncSession, user_id: str) -> str:
     """Generate a 6-digit email MFA code, store its hash, and return the plaintext code."""
     settings = get_settings()
     code = str(secrets.randbelow(900_000) + 100_000)  # 100000–999999
-    expires_at = datetime.now(tz=timezone.utc) + timedelta(
-        minutes=settings.mfa_email_code_expire_minutes
-    )
+    expires_at = datetime.now(tz=UTC) + timedelta(minutes=settings.mfa_email_code_expire_minutes)
     entry = MfaCode(
         user_id=user_id,
         code_hash=_hash_code(code),
@@ -123,7 +120,7 @@ async def create_email_mfa_code(db: AsyncSession, user_id: str) -> str:
 
 async def verify_email_mfa_code(db: AsyncSession, user_id: str, code: str) -> bool:
     """Verify an email MFA code. Marks it as used on success. Returns True if valid."""
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     result = await db.execute(
         select(MfaCode).where(
             MfaCode.user_id == user_id,
@@ -145,7 +142,8 @@ async def verify_email_mfa_code(db: AsyncSession, user_id: str, code: str) -> bo
 
 # ── User lookup ───────────────────────────────────────────────────────────────
 
-async def get_active_user(db: AsyncSession, user_id: str) -> Optional[User]:
+
+async def get_active_user(db: AsyncSession, user_id: str) -> User | None:
     """Fetch an active, non-deleted user by ID."""
     result = await db.execute(
         select(User).where(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 import httpx
 from sqlalchemy import select
@@ -67,8 +66,9 @@ async def _send(
 
 async def _send_smtp(subject: str, body: str, severity: AlertSeverity, config: dict) -> None:
     """Send an alert via SMTP."""
-    import aiosmtplib
     from email.mime.text import MIMEText
+
+    import aiosmtplib
 
     settings = get_settings()
     host = config.get("host") or settings.smtp_host
@@ -130,9 +130,7 @@ async def _send_slack(subject: str, body: str, severity: AlertSeverity, config: 
         return
 
     emoji = {"info": ":information_source:", "warning": ":warning:", "critical": ":rotating_light:"}
-    payload = {
-        "text": f"{emoji.get(severity, '')} *[{severity.upper()}] {subject}*\n{body}"
-    }
+    payload = {"text": f"{emoji.get(severity, '')} *[{severity.upper()}] {subject}*\n{body}"}
     async with httpx.AsyncClient() as client:
         client.post(webhook_url, json=payload, timeout=10)
 
@@ -145,7 +143,9 @@ async def _send_pagerduty(subject: str, body: str, severity: AlertSeverity, conf
         log.warning("PagerDuty alert skipped — no integration key configured")
         return
 
-    pd_severity = {"info": "info", "warning": "warning", "critical": "critical"}.get(severity, "warning")
+    pd_severity = {"info": "info", "warning": "warning", "critical": "critical"}.get(
+        severity, "warning"
+    )
     payload = {
         "routing_key": key,
         "event_action": "trigger",

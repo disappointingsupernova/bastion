@@ -8,9 +8,9 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
+import bastion.models  # noqa: F401 — ensure all models are registered
 from bastion.config import get_settings
 from bastion.db import Base
-import bastion.models  # noqa: F401 — ensure all models are registered
 
 config = context.config
 if config.config_file_name is not None:

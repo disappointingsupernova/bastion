@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from workers.celery_app import app
 from bastion.logging import get_logger
+from workers.celery_app import app
 
 log = get_logger(__name__)
 
@@ -19,11 +19,12 @@ def offload_recording(self, session_id: str) -> None:
 
 async def _offload(session_id: str) -> None:
     """Async implementation of recording offload."""
+    import boto3
+    from sqlalchemy import select
+
+    from bastion.config import StorageBackend, get_settings
     from bastion.db import get_db_session
     from bastion.models import Session
-    from bastion.config import get_settings, StorageBackend
-    from sqlalchemy import select
-    import boto3
 
     settings = get_settings()
 
@@ -32,7 +33,9 @@ async def _offload(session_id: str) -> None:
         session = result.scalar_one_or_none()
 
     if session is None or not session.recording_path:
-        log.warning("Recording offload skipped — session or recording not found", session_id=session_id)
+        log.warning(
+            "Recording offload skipped — session or recording not found", session_id=session_id
+        )
         return
 
     recording_path = Path(session.recording_path)

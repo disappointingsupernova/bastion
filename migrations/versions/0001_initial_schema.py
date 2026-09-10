@@ -7,8 +7,8 @@ Create Date: 2024-01-15 12:00:00.000000
 
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "0001"
 down_revision = None
@@ -38,8 +38,12 @@ def upgrade() -> None:
         sa.Column("failed_login_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("locked_until", sa.DateTime(timezone=True), nullable=True),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
 
     op.create_table(
@@ -56,11 +60,17 @@ def upgrade() -> None:
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_check_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("proxy_jump_server_id", sa.String(36), sa.ForeignKey("servers.id"), nullable=True),
+        sa.Column(
+            "proxy_jump_server_id", sa.String(36), sa.ForeignKey("servers.id"), nullable=True
+        ),
         sa.Column("hardening_applied", sa.Boolean(), nullable=False, server_default="0"),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
 
     op.create_table(
@@ -73,8 +83,12 @@ def upgrade() -> None:
         sa.Column("provisioned", sa.Boolean(), nullable=False, server_default="0"),
         sa.Column("provisioned_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         sa.UniqueConstraint("user_id", "server_id"),
     )
 
@@ -96,8 +110,12 @@ def upgrade() -> None:
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("revocation_reason", sa.String(255), nullable=True),
         sa.Column("issued_from_ip", sa.String(45), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
 
     op.create_table(
@@ -105,9 +123,13 @@ def upgrade() -> None:
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("user_id", sa.String(36), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("server_id", sa.String(36), sa.ForeignKey("servers.id"), nullable=False),
-        sa.Column("certificate_id", sa.String(36), sa.ForeignKey("ssh_certificates.id"), nullable=True),
+        sa.Column(
+            "certificate_id", sa.String(36), sa.ForeignKey("ssh_certificates.id"), nullable=True
+        ),
         sa.Column("status", sa.String(32), nullable=False, server_default="active"),
-        sa.Column("started_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "started_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("source_ip", sa.String(45), nullable=True),
         sa.Column("remote_username", sa.String(64), nullable=True),
@@ -116,8 +138,12 @@ def upgrade() -> None:
         sa.Column("bytes_sent", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("bytes_received", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("termination_reason", sa.String(255), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
 
     op.create_table(
@@ -131,8 +157,12 @@ def upgrade() -> None:
         sa.Column("ip_address", sa.String(45), nullable=True),
         sa.Column("success", sa.Boolean(), nullable=False),
         sa.Column("node_id", sa.String(64), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
 
     op.create_table(
@@ -142,8 +172,12 @@ def upgrade() -> None:
         sa.Column("code_hash", sa.String(255), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("used", sa.Boolean(), nullable=False, server_default="0"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
 
     op.create_table(
@@ -157,8 +191,12 @@ def upgrade() -> None:
         sa.Column("detail", sa.Text(), nullable=True),
         sa.Column("alerted", sa.Boolean(), nullable=False, server_default="0"),
         sa.Column("resolved", sa.Boolean(), nullable=False, server_default="0"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
 
     op.create_table(
@@ -168,8 +206,12 @@ def upgrade() -> None:
         sa.Column("enabled", sa.Boolean(), nullable=False, server_default="0"),
         sa.Column("config_json", sa.Text(), nullable=True),
         sa.Column("min_severity", sa.String(32), nullable=False, server_default="warning"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
 
     op.create_table(
@@ -178,8 +220,12 @@ def upgrade() -> None:
         sa.Column("value", sa.Text(), nullable=True),
         sa.Column("description", sa.String(512), nullable=True),
         sa.Column("encrypted", sa.Boolean(), nullable=False, server_default="0"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
 
     op.create_table(
@@ -191,8 +237,12 @@ def upgrade() -> None:
         sa.Column("available_version", sa.String(128), nullable=True),
         sa.Column("update_available", sa.Boolean(), nullable=False, server_default="0"),
         sa.Column("last_checked_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         sa.UniqueConstraint("server_id", "package_name"),
     )
 

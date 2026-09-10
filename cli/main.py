@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
-import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 import httpx
 import typer
@@ -38,12 +34,14 @@ def _api_client(admin: bool = False) -> httpx.Client:
     """Return an httpx client connected to the appropriate Unix socket."""
     socket = _ADMIN_SOCKET if admin else _API_SOCKET
     if not socket.exists():
-        err_console.print(f"[red]Error:[/red] Bastion API socket not found at {socket}. Is the service running?")
+        err_console.print(
+            f"[red]Error:[/red] Bastion API socket not found at {socket}. Is the service running?"
+        )
         raise typer.Exit(1)
     return httpx.Client(transport=_get_transport(socket), base_url="http://bastion")
 
 
-def _load_token() -> Optional[str]:
+def _load_token() -> str | None:
     """Load the stored access token from the user's home directory."""
     if _TOKEN_FILE.exists():
         return _TOKEN_FILE.read_text().strip()
@@ -68,6 +66,7 @@ def _auth_headers() -> dict[str, str]:
 
 # ── Commands ──────────────────────────────────────────────────────────────────
 
+
 @app.command()
 def login(
     username: str = typer.Option(..., prompt=True),
@@ -78,7 +77,9 @@ def login(
         response = client.post("/auth/login", json={"username": username, "password": password})
 
     if response.status_code != 200:
-        err_console.print(f"[red]Login failed:[/red] {response.json().get('detail', 'Unknown error')}")
+        err_console.print(
+            f"[red]Login failed:[/red] {response.json().get('detail', 'Unknown error')}"
+        )
         raise typer.Exit(1)
 
     data = response.json()
@@ -89,7 +90,9 @@ def login(
         with _api_client() as client:
             response = client.post("/auth/mfa/verify", json={"mfa_token": mfa_token, "code": code})
         if response.status_code != 200:
-            err_console.print(f"[red]MFA verification failed:[/red] {response.json().get('detail', 'Unknown error')}")
+            err_console.print(
+                f"[red]MFA verification failed:[/red] {response.json().get('detail', 'Unknown error')}"
+            )
             raise typer.Exit(1)
         data = response.json()
 
@@ -100,7 +103,9 @@ def login(
 @app.command()
 def connect(
     hostname: str = typer.Argument(..., help="Hostname of the server to connect to"),
-    identity: Optional[Path] = typer.Option(None, "--identity", "-i", help="Path to your SSH private key"),
+    identity: Path | None = typer.Option(
+        None, "--identity", "-i", help="Path to your SSH private key"
+    ),
 ) -> None:
     """Connect to a remote server via the Bastion proxy."""
     # Resolve the SSH key to use
@@ -126,10 +131,14 @@ def connect(
         )
 
     if response.status_code == 401:
-        err_console.print("[red]Session expired.[/red] Run [bold]bastion login[/bold] to re-authenticate.")
+        err_console.print(
+            "[red]Session expired.[/red] Run [bold]bastion login[/bold] to re-authenticate."
+        )
         raise typer.Exit(1)
     if response.status_code != 200:
-        err_console.print(f"[red]Connection failed:[/red] {response.json().get('detail', 'Unknown error')}")
+        err_console.print(
+            f"[red]Connection failed:[/red] {response.json().get('detail', 'Unknown error')}"
+        )
         raise typer.Exit(1)
 
     data = response.json()
@@ -144,16 +153,22 @@ def connect(
         cert_file.write_text(cert)
         cert_file.chmod(0o600)
 
-        console.print(f"[green]→[/green] Connecting to [bold]{remote_user}@{hostname}[/bold]:{port}")
+        console.print(
+            f"[green]→[/green] Connecting to [bold]{remote_user}@{hostname}[/bold]:{port}"
+        )
 
         os.execvp(
             "ssh",
             [
                 "ssh",
-                "-i", str(key_path),
-                "-o", f"CertificateFile={cert_file}",
-                "-o", "StrictHostKeyChecking=accept-new",
-                "-p", str(port),
+                "-i",
+                str(key_path),
+                "-o",
+                f"CertificateFile={cert_file}",
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-p",
+                str(port),
                 f"{remote_user}@{hostname}",
             ],
         )
@@ -192,6 +207,7 @@ def sessions(
         duration = "—"
         if s.get("ended_at"):
             from datetime import datetime
+
             start = datetime.fromisoformat(s["started_at"])
             end = datetime.fromisoformat(s["ended_at"])
             secs = int((end - start).total_seconds())
@@ -211,7 +227,9 @@ def sessions(
 
 @app.command()
 def cert(
-    identity: Optional[Path] = typer.Option(None, "--identity", "-i", help="Path to your SSH public key"),
+    identity: Path | None = typer.Option(
+        None, "--identity", "-i", help="Path to your SSH public key"
+    ),
 ) -> None:
     """Issue a new SSH certificate for your public key."""
     pub_key_path = identity or Path.home() / ".ssh" / "id_ed25519.pub"
@@ -229,7 +247,9 @@ def cert(
         )
 
     if response.status_code != 200:
-        err_console.print(f"[red]Certificate issuance failed:[/red] {response.json().get('detail', 'Unknown error')}")
+        err_console.print(
+            f"[red]Certificate issuance failed:[/red] {response.json().get('detail', 'Unknown error')}"
+        )
         raise typer.Exit(1)
 
     data = response.json()
@@ -237,7 +257,9 @@ def cert(
     cert_path.write_text(data["certificate"])
     cert_path.chmod(0o600)
 
-    console.print(f"[green]✓[/green] Certificate issued — serial [bold]{data['serial']}[/bold], valid for [bold]{data['valid_hours']}h[/bold]")
+    console.print(
+        f"[green]✓[/green] Certificate issued — serial [bold]{data['serial']}[/bold], valid for [bold]{data['valid_hours']}h[/bold]"
+    )
     console.print(f"  Saved to: {cert_path}")
 
 

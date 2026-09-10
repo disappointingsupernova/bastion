@@ -5,14 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 import asyncssh
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from bastion.config import get_settings
 from bastion.crypto.encryption import encrypt_recording_age
 from bastion.db import get_db_session
 from bastion.logging import get_logger
@@ -27,13 +24,13 @@ class AsciinemaRecorder:
     def __init__(self, path: Path, width: int = 220, height: int = 50) -> None:
         self._path = path
         self._start = time.time()
-        self._file = open(path, "w", encoding="utf-8")  # noqa: WPS515
+        self._file = open(path, "w", encoding="utf-8")  # noqa: SIM115
         header = {
             "version": 2,
             "width": width,
             "height": height,
             "timestamp": int(self._start),
-            "title": f"Bastion session — {datetime.now(tz=timezone.utc).isoformat()}",
+            "title": f"Bastion session — {datetime.now(tz=UTC).isoformat()}",
         }
         self._file.write(json.dumps(header) + "\n")
         self._file.flush()
@@ -59,12 +56,12 @@ class BastionSSHSession(asyncssh.SSHServerSession):
         self,
         session_record: Session,
         target_conn: asyncssh.SSHClientConnection,
-        recorder: Optional[AsciinemaRecorder],
+        recorder: AsciinemaRecorder | None,
     ) -> None:
         self._session_record = session_record
         self._target_conn = target_conn
         self._recorder = recorder
-        self._target_process: Optional[asyncssh.SSHClientProcess] = None
+        self._target_process: asyncssh.SSHClientProcess | None = None
         self._bytes_sent = 0
         self._bytes_received = 0
 
@@ -118,7 +115,9 @@ class BastionSSHSession(asyncssh.SSHServerSession):
                     self._recorder.write_output(data)
                 self._chan.write(data)
         except Exception as exc:
-            log.debug("Output forwarding ended", session_id=self._session_record.id, reason=str(exc))
+            log.debug(
+                "Output forwarding ended", session_id=self._session_record.id, reason=str(exc)
+            )
         finally:
             exit_status = self._target_process.exit_status or 0
             self._chan.exit(exit_status)
@@ -142,17 +141,20 @@ class BastionSSHSession(asyncssh.SSHServerSession):
 
         async with get_db_session() as db:
             from sqlalchemy import select as sa_select
+
             result = await db.execute(
                 sa_select(Session).where(Session.id == self._session_record.id)
             )
             session = result.scalar_one_or_none()
             if session:
                 session.status = SessionStatus.COMPLETED
-                session.ended_at = datetime.now(tz=timezone.utc)
+                session.ended_at = datetime.now(tz=UTC)
                 session.bytes_sent = self._bytes_sent
                 session.bytes_received = self._bytes_received
 
                 if self._recorder:
+                    from bastion.config import get_settings
+
                     settings = get_settings()
                     recording_path = Path(self._session_record.recording_path)
                     if settings.recordings_age_public_key and recording_path.exists():
@@ -191,8 +193,6 @@ async def open_proxy_session(
     """
     import tempfile
 
-    settings = get_settings()
-
     with tempfile.TemporaryDirectory(prefix="bastion-proxy-") as tmpdir:
         tmp = Path(tmpdir)
         key_file = tmp / "id_ed25519"
@@ -213,8 +213,10 @@ async def open_proxy_session(
         if server.proxy_jump_server_id:
             # Proxy jump via an intermediate host
             from sqlalchemy import select
+
             async with get_db_session() as db:
                 from bastion.models import Server as ServerModel
+
                 result = await db.execute(
                     select(ServerModel).where(ServerModel.id == server.proxy_jump_server_id)
                 )

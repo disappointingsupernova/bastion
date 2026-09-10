@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Annotated, Optional
+from datetime import UTC, datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -22,7 +22,7 @@ from bastion.models import (
     User,
     UserRole,
 )
-from bastion_api.deps import get_current_user, require_role
+from bastion_api.deps import require_role
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/servers", tags=["Servers"])
@@ -33,23 +33,23 @@ _admin_or_auditor = require_role(UserRole.ADMIN, UserRole.AUDITOR, UserRole.READ
 
 class OnboardServerRequest(BaseModel):
     hostname: str
-    display_name: Optional[str] = None
+    display_name: str | None = None
     ssh_port: int = 22
     os_family: OsFamily = OsFamily.UNKNOWN
-    tags: Optional[list[str]] = None
-    notes: Optional[str] = None
-    proxy_jump_hostname: Optional[str] = None
+    tags: list[str] | None = None
+    notes: str | None = None
+    proxy_jump_hostname: str | None = None
 
 
 class ServerResponse(BaseModel):
     id: str
     hostname: str
-    display_name: Optional[str]
+    display_name: str | None
     ssh_port: int
     os_family: str
     status: str
     hardening_applied: bool
-    last_seen_at: Optional[datetime]
+    last_seen_at: datetime | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -58,11 +58,11 @@ class ServerResponse(BaseModel):
 class GrantAccessRequest(BaseModel):
     user_id: str
     allow_sudo: bool = False
-    remote_username: Optional[str] = None
+    remote_username: str | None = None
 
 
 class PackageUpdateRequest(BaseModel):
-    package_names: Optional[list[str]] = None  # None means update all
+    package_names: list[str] | None = None  # None means update all
 
 
 @router.post("/", response_model=ServerResponse, status_code=status.HTTP_201_CREATED)
@@ -112,7 +112,9 @@ async def onboard_server(
     await db.flush()
 
     await audit(
-        db, "admin.server.onboard", success=True,
+        db,
+        "admin.server.onboard",
+        success=True,
         user_id=current_user.id,
         resource_type="server",
         resource_id=server.id,
@@ -172,7 +174,9 @@ async def grant_access(
     await db.flush()
 
     await audit(
-        db, "admin.server.access.grant", success=True,
+        db,
+        "admin.server.access.grant",
+        success=True,
         user_id=current_user.id,
         resource_type="server_access",
         resource_id=access.id,
@@ -207,10 +211,12 @@ async def revoke_access(
     if access is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Access grant not found.")
 
-    access.revoked_at = datetime.now(tz=timezone.utc)
+    access.revoked_at = datetime.now(tz=UTC)
     await db.flush()
     await audit(
-        db, "admin.server.access.revoke", success=True,
+        db,
+        "admin.server.access.revoke",
+        success=True,
         user_id=current_user.id,
         resource_type="server_access",
         resource_id=access.id,
@@ -229,15 +235,17 @@ async def provision_server(
 
     This is an async operation — the task is queued and returns immediately.
     """
-    from workers.tasks.connectivity import check_all_servers
     # Trigger provisioning via Celery
     from celery import current_app
+
     current_app.send_task(
         "workers.tasks.provisioning.provision_server",
         args=[server_id, current_user.id],
     )
     await audit(
-        db, "admin.server.provision", success=True,
+        db,
+        "admin.server.provision",
+        success=True,
         user_id=current_user.id,
         resource_type="server",
         resource_id=server_id,
@@ -278,12 +286,15 @@ async def apply_package_updates(
 ) -> dict:
     """Queue a package update task for the specified server."""
     from celery import current_app
+
     current_app.send_task(
         "workers.tasks.packages.apply_updates_for_server",
         args=[server_id, body.package_names, current_user.id],
     )
     await audit(
-        db, "admin.server.packages.update", success=True,
+        db,
+        "admin.server.packages.update",
+        success=True,
         user_id=current_user.id,
         resource_type="server",
         resource_id=server_id,
@@ -301,12 +312,15 @@ async def reboot_server(
 ) -> dict:
     """Queue a reboot for the specified server."""
     from celery import current_app
+
     current_app.send_task(
         "workers.tasks.provisioning.reboot_server",
         args=[server_id, delay_seconds, current_user.id],
     )
     await audit(
-        db, "admin.server.reboot", success=True,
+        db,
+        "admin.server.reboot",
+        success=True,
         user_id=current_user.id,
         resource_type="server",
         resource_id=server_id,
@@ -330,10 +344,12 @@ async def delete_server(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found.")
 
     server.status = ServerStatus.DELETED
-    server.deleted_at = datetime.now(tz=timezone.utc)
+    server.deleted_at = datetime.now(tz=UTC)
     await db.flush()
     await audit(
-        db, "admin.server.delete", success=True,
+        db,
+        "admin.server.delete",
+        success=True,
         user_id=current_user.id,
         resource_type="server",
         resource_id=server_id,

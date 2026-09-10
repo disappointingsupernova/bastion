@@ -65,6 +65,7 @@ class TestJWT:
     def test_tampered_token_raises(self):
         """A tampered token must raise JWTError on decode."""
         from jose import JWTError
+
         token = create_access_token("user-id-123", "alice", "user")
         tampered = token[:-4] + "XXXX"
         with pytest.raises(JWTError):
@@ -84,6 +85,7 @@ class TestTOTP:
     def test_secret_is_base32(self):
         """Generated TOTP secret must be a valid base32 string."""
         import base64
+
         secret = generate_totp_secret()
         # Should not raise
         base64.b32decode(secret)
@@ -99,6 +101,7 @@ class TestTOTP:
     def test_valid_totp_code_verifies(self):
         """A freshly generated TOTP code must verify successfully."""
         import pyotp
+
         secret = generate_totp_secret()
         code = pyotp.TOTP(secret).now()
         assert verify_totp(secret, code) is True

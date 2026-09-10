@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,12 +17,12 @@ async def audit(
     db: AsyncSession,
     action: str,
     success: bool,
-    user_id: Optional[str] = None,
-    resource_type: Optional[str] = None,
-    resource_id: Optional[str] = None,
-    detail: Optional[dict[str, Any]] = None,
-    ip_address: Optional[str] = None,
-    node_id: Optional[str] = None,
+    user_id: str | None = None,
+    resource_type: str | None = None,
+    resource_id: str | None = None,
+    detail: dict[str, Any] | None = None,
+    ip_address: str | None = None,
+    node_id: str | None = None,
 ) -> AuditLog:
     """Write an audit log entry to the database.
 

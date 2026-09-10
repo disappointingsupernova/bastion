@@ -42,6 +42,7 @@ class TestLoginEndpoint:
     async def test_login_suspended_user(self, api_client: AsyncClient, regular_user, db_session):
         """Login with a suspended account must return 403."""
         from bastion.models import UserStatus
+
         regular_user.status = UserStatus.SUSPENDED
         await db_session.flush()
 
@@ -59,6 +60,7 @@ class TestTokenRefresh:
     async def test_refresh_returns_new_access_token(self, api_client: AsyncClient, regular_user):
         """A valid refresh token must return a new access token."""
         from bastion.auth import create_refresh_token
+
         refresh = create_refresh_token(regular_user.id)
 
         response = await api_client.post(
@@ -79,7 +81,10 @@ class TestTokenRefresh:
     async def test_access_token_rejected_as_refresh(self, api_client: AsyncClient, regular_user):
         """An access token must not be accepted as a refresh token."""
         from bastion.auth import create_access_token
-        access = create_access_token(regular_user.id, regular_user.username, regular_user.role.value)
+
+        access = create_access_token(
+            regular_user.id, regular_user.username, regular_user.role.value
+        )
 
         response = await api_client.post(
             "/auth/refresh",

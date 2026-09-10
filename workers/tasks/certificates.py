@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from workers.celery_app import app
 from bastion.logging import get_logger
+from workers.celery_app import app
 
 log = get_logger(__name__)
 
@@ -19,11 +19,12 @@ def expire_old_certificates(self) -> None:
 
 async def _expire_old_certificates() -> None:
     """Async implementation of certificate expiry."""
-    from bastion.db import get_db_session
-    from bastion.models import SshCertificate, CertStatus
     from sqlalchemy import select
 
-    now = datetime.now(tz=timezone.utc)
+    from bastion.db import get_db_session
+    from bastion.models import CertStatus, SshCertificate
+
+    now = datetime.now(tz=UTC)
     async with get_db_session() as db:
         result = await db.execute(
             select(SshCertificate).where(

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
+
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 # Set test environment before any application imports
@@ -14,8 +15,8 @@ os.environ.setdefault("DB_URL", "sqlite+aiosqlite:///./test.db")
 os.environ.setdefault("ENVIRONMENT", "development")
 
 from bastion.db import Base, get_db
-from bastion_api.main import app as api_app
 from bastion_admin.main import app as admin_app
+from bastion_api.main import app as api_app
 
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
@@ -105,6 +106,7 @@ async def regular_user(db_session: AsyncSession):
 def admin_token(admin_user) -> str:
     """Return a valid JWT access token for the test admin user."""
     from bastion.auth import create_access_token
+
     return create_access_token(admin_user.id, admin_user.username, admin_user.role.value)
 
 
@@ -112,4 +114,5 @@ def admin_token(admin_user) -> str:
 def user_token(regular_user) -> str:
     """Return a valid JWT access token for the test regular user."""
     from bastion.auth import create_access_token
+
     return create_access_token(regular_user.id, regular_user.username, regular_user.role.value)

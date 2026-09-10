@@ -5,19 +5,18 @@ from __future__ import annotations
 import base64
 import os
 import subprocess
-import tempfile
 from pathlib import Path
-from typing import Optional
 
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from bastion.logging import get_logger
 
 log = get_logger(__name__)
 
 # ── Fernet (secrets at rest) ──────────────────────────────────────────────────
+
 
 def _derive_fernet_key(secret_key: str) -> bytes:
     """Derive a Fernet key from the application secret key using PBKDF2."""
@@ -50,6 +49,7 @@ def decrypt_secret(token: str, secret_key: str) -> str:
 
 # ── age (session recording encryption) ───────────────────────────────────────
 
+
 def encrypt_recording_age(plaintext_path: Path, age_public_key: str) -> Path:
     """Encrypt a session recording file using age with the configured public key.
 
@@ -60,7 +60,14 @@ def encrypt_recording_age(plaintext_path: Path, age_public_key: str) -> Path:
     encrypted_path = plaintext_path.with_suffix(plaintext_path.suffix + ".age")
 
     result = subprocess.run(
-        ["age", "--recipient", age_public_key, "--output", str(encrypted_path), str(plaintext_path)],
+        [
+            "age",
+            "--recipient",
+            age_public_key,
+            "--output",
+            str(encrypted_path),
+            str(plaintext_path),
+        ],
         capture_output=True,
         timeout=60,
     )

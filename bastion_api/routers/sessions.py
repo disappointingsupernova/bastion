@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Annotated, Optional
+from datetime import UTC, datetime
+from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -39,7 +39,7 @@ class SessionSummary(BaseModel):
     server_hostname: str
     status: str
     started_at: datetime
-    ended_at: Optional[datetime]
+    ended_at: datetime | None
     bytes_sent: int
     bytes_received: int
     recording_available: bool
@@ -89,16 +89,21 @@ async def connect(
     access = result.scalar_one_or_none()
     if access is None:
         await audit(
-            db, "session.connect.denied", success=False,
+            db,
+            "session.connect.denied",
+            success=False,
             user_id=current_user.id,
             resource_type="server",
             resource_id=server.id,
             detail={"hostname": body.hostname, "reason": "No access grant"},
         )
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access to this server is not permitted.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access to this server is not permitted."
+        )
 
     # Issue certificate
     from bastion.crypto.ca import issue_certificate
+
     principals = [access.remote_username or current_user.username]
     cert_bytes, cert_record = await issue_certificate(
         db=db,
@@ -122,7 +127,7 @@ async def connect(
         server_id=server.id,
         certificate_id=cert_record.id,
         status=SessionStatus.ACTIVE,
-        started_at=datetime.now(tz=timezone.utc),
+        started_at=datetime.now(tz=UTC),
         remote_username=access.remote_username or current_user.username,
         recording_path=recording_path,
     )
@@ -130,7 +135,9 @@ async def connect(
     await db.flush()
 
     await audit(
-        db, "session.connect", success=True,
+        db,
+        "session.connect",
+        success=True,
         user_id=current_user.id,
         resource_type="session",
         resource_id=session.id,
@@ -202,14 +209,18 @@ async def terminate_session(
     )
     session = result.scalar_one_or_none()
     if session is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active session not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Active session not found."
+        )
 
     session.status = SessionStatus.TERMINATED
-    session.ended_at = datetime.now(tz=timezone.utc)
+    session.ended_at = datetime.now(tz=UTC)
     session.termination_reason = "Terminated by user"
 
     await audit(
-        db, "session.terminate", success=True,
+        db,
+        "session.terminate",
+        success=True,
         user_id=current_user.id,
         resource_type="session",
         resource_id=session_id,

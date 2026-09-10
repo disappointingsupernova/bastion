@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import httpx
 import typer
@@ -50,7 +49,7 @@ def _api_client() -> httpx.Client:
     )
 
 
-def _load_token() -> Optional[str]:
+def _load_token() -> str | None:
     """Load the stored admin access token."""
     if _TOKEN_FILE.exists():
         return _TOKEN_FILE.read_text().strip()
@@ -68,19 +67,24 @@ def _auth_headers() -> dict[str, str]:
     """Return the Authorization header for authenticated requests."""
     token = _load_token()
     if not token:
-        err_console.print("[red]Not authenticated.[/red] Run [bold]bastion-admin login[/bold] first.")
+        err_console.print(
+            "[red]Not authenticated.[/red] Run [bold]bastion-admin login[/bold] first."
+        )
         raise typer.Exit(1)
     return {"Authorization": f"Bearer {token}"}
 
 
 def _handle_error(response: httpx.Response) -> None:
     """Print a formatted error message and exit on non-2xx responses."""
-    detail = response.json().get("detail", "Unknown error") if response.content else "No response body"
+    detail = (
+        response.json().get("detail", "Unknown error") if response.content else "No response body"
+    )
     err_console.print(f"[red]Error {response.status_code}:[/red] {detail}")
     raise typer.Exit(1)
 
 
 # ── Login ─────────────────────────────────────────────────────────────────────
+
 
 @app.command()
 def login(
@@ -110,13 +114,14 @@ def login(
 
 # ── User commands ─────────────────────────────────────────────────────────────
 
+
 @user_app.command("create")
 def user_create(
     username: str = typer.Option(..., prompt=True),
     email: str = typer.Option(..., prompt=True),
     role: str = typer.Option("user", help="Role: admin, user, auditor, read_only"),
-    mfa_method: Optional[str] = typer.Option(None, help="MFA method: totp, email"),
-    full_name: Optional[str] = typer.Option(None),
+    mfa_method: str | None = typer.Option(None, help="MFA method: totp, email"),
+    full_name: str | None = typer.Option(None),
 ) -> None:
     """Create a new Bastion user."""
     password = typer.prompt("Password", hide_input=True, confirmation_prompt=True)
@@ -208,14 +213,15 @@ def user_delete(
 
 # ── Server commands ───────────────────────────────────────────────────────────
 
+
 @server_app.command("add")
 def server_add(
     hostname: str = typer.Argument(...),
-    display_name: Optional[str] = typer.Option(None, "--display-name"),
+    display_name: str | None = typer.Option(None, "--display-name"),
     port: int = typer.Option(22, "--port"),
     os_family: str = typer.Option("unknown", "--os-family", help="debian, rhel, unknown"),
-    proxy_jump: Optional[str] = typer.Option(None, "--proxy-jump", help="Proxy jump server hostname"),
-    tags: Optional[str] = typer.Option(None, "--tags", help="Comma-separated tags"),
+    proxy_jump: str | None = typer.Option(None, "--proxy-jump", help="Proxy jump server hostname"),
+    tags: str | None = typer.Option(None, "--tags", help="Comma-separated tags"),
 ) -> None:
     """Onboard a new server."""
     tag_list = [t.strip() for t in tags.split(",")] if tags else []
@@ -232,7 +238,9 @@ def server_add(
     if response.status_code != 201:
         _handle_error(response)
     s = response.json()
-    console.print(f"[green]✓[/green] Server [bold]{s['hostname']}[/bold] onboarded (ID: {s['id'][:8]})")
+    console.print(
+        f"[green]✓[/green] Server [bold]{s['hostname']}[/bold] onboarded (ID: {s['id'][:8]})"
+    )
 
 
 @server_app.command("list")
@@ -306,12 +314,13 @@ def server_reboot(
 
 # ── Access commands ───────────────────────────────────────────────────────────
 
+
 @access_app.command("grant")
 def access_grant(
     user: str = typer.Option(..., "--user", "-u"),
     server: str = typer.Option(..., "--server", "-s"),
     sudo: bool = typer.Option(False, "--sudo", help="Grant passwordless sudo"),
-    remote_username: Optional[str] = typer.Option(None, "--remote-username"),
+    remote_username: str | None = typer.Option(None, "--remote-username"),
 ) -> None:
     """Grant a user access to a server."""
     user_id = _resolve_user_id(user)
@@ -322,11 +331,15 @@ def access_grant(
         "remote_username": remote_username,
     }
     with _api_client() as client:
-        response = client.post(f"/servers/{server_id}/access", json=payload, headers=_auth_headers())
+        response = client.post(
+            f"/servers/{server_id}/access", json=payload, headers=_auth_headers()
+        )
     if response.status_code != 201:
         _handle_error(response)
     sudo_note = " [bold](with sudo)[/bold]" if sudo else ""
-    console.print(f"[green]✓[/green] Access granted: [bold]{user}[/bold] → [bold]{server}[/bold]{sudo_note}")
+    console.print(
+        f"[green]✓[/green] Access granted: [bold]{user}[/bold] → [bold]{server}[/bold]{sudo_note}"
+    )
 
 
 @access_app.command("revoke")
@@ -346,10 +359,11 @@ def access_revoke(
 
 # ── Certificate commands ──────────────────────────────────────────────────────
 
+
 @cert_app.command("list")
 def cert_list(
-    user: Optional[str] = typer.Option(None, "--user", "-u"),
-    cert_status: Optional[str] = typer.Option(None, "--status", help="active, expired, revoked"),
+    user: str | None = typer.Option(None, "--user", "-u"),
+    cert_status: str | None = typer.Option(None, "--status", help="active, expired, revoked"),
     limit: int = typer.Option(50, "--limit"),
 ) -> None:
     """List SSH certificates."""
@@ -379,7 +393,9 @@ def cert_list(
     table.add_column("Status")
 
     for c in certs:
-        status_colour = {"active": "green", "expired": "yellow", "revoked": "red"}.get(c["status"], "white")
+        status_colour = {"active": "green", "expired": "yellow", "revoked": "red"}.get(
+            c["status"], "white"
+        )
         valid_until = c["valid_before"][:16].replace("T", " ")
         table.add_row(
             c["id"][:8],
@@ -411,10 +427,11 @@ def cert_revoke(
 
 # ── Audit commands ────────────────────────────────────────────────────────────
 
+
 @audit_app.command("log")
 def audit_log(
-    user: Optional[str] = typer.Option(None, "--user", "-u"),
-    action: Optional[str] = typer.Option(None, "--action", "-a"),
+    user: str | None = typer.Option(None, "--user", "-u"),
+    action: str | None = typer.Option(None, "--action", "-a"),
     failures_only: bool = typer.Option(False, "--failures-only"),
     limit: int = typer.Option(50, "--limit"),
 ) -> None:
@@ -463,6 +480,7 @@ def audit_log(
 
 # ── Package commands ──────────────────────────────────────────────────────────
 
+
 @packages_app.command("list")
 def packages_list(
     hostname: str = typer.Argument(...),
@@ -503,7 +521,7 @@ def packages_list(
 @packages_app.command("update")
 def packages_update(
     hostname: str = typer.Argument(...),
-    packages: Optional[str] = typer.Option(None, "--packages", help="Comma-separated package names"),
+    packages: str | None = typer.Option(None, "--packages", help="Comma-separated package names"),
     confirm: bool = typer.Option(False, "--confirm"),
 ) -> None:
     """Apply package updates on a remote server."""
@@ -525,6 +543,7 @@ def packages_update(
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _resolve_user_id(username: str) -> str:
     """Resolve a username to a user ID via the API."""
