@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
 import jwt
+import pytest
 
 from bastion.auth import (
     create_access_token,
