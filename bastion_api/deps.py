@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
+import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bastion.auth import decode_token, get_active_user
@@ -38,7 +38,7 @@ async def get_current_user(
         token_type: str = payload.get("type") or ""
         if not user_id or token_type != "access":
             raise credentials_exception
-    except JWTError:
+    except jwt.PyJWTError:
         raise credentials_exception from None
 
     user = await get_active_user(db, user_id)

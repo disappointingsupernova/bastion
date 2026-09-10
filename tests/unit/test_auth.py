@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from jose import jwt
+import jwt
 
 from bastion.auth import (
     create_access_token,
@@ -63,12 +63,10 @@ class TestJWT:
         assert payload["sub"] == "user-id-123"
 
     def test_tampered_token_raises(self):
-        """A tampered token must raise JWTError on decode."""
-        from jose import JWTError
-
+        """A tampered token must raise jwt.PyJWTError on decode."""
         token = create_access_token("user-id-123", "alice", "user")
         tampered = token[:-4] + "XXXX"
-        with pytest.raises(JWTError):
+        with pytest.raises(jwt.PyJWTError):
             decode_token(tampered)
 
     def test_token_signed_with_secret_key(self):

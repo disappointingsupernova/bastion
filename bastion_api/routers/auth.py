@@ -174,7 +174,7 @@ async def login(
         # Issue a short-lived MFA-pending token (5 minutes)
         import time
 
-        from jose import jwt
+        import jwt
 
         mfa_token = jwt.encode(
             {"sub": user.id, "type": "mfa_pending", "exp": int(time.time()) + 300},
@@ -205,7 +205,7 @@ async def verify_mfa(
     settings = get_settings()
 
     try:
-        from jose import jwt
+        import jwt
 
         payload = jwt.decode(
             body.mfa_token, settings.secret_key, algorithms=[settings.jwt_algorithm]
@@ -213,7 +213,7 @@ async def verify_mfa(
         if payload.get("type") != "mfa_pending":
             raise ValueError("Invalid token type")
         user_id = payload["sub"]
-    except Exception:
+    except (jwt.PyJWTError, ValueError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired MFA token."
         ) from None

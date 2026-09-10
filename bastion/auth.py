@@ -7,8 +7,8 @@ import secrets
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
+import jwt
 import pyotp
-from jose import jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,7 +68,7 @@ def create_refresh_token(user_id: str) -> str:
 
 
 def decode_token(token: str) -> dict:  # type: ignore[type-arg]
-    """Decode and validate a JWT token. Raises JWTError on failure."""
+    """Decode and validate a JWT token. Raises jwt.PyJWTError on failure."""
     settings = get_settings()
     result: dict = jwt.decode(token, settings.secret_key, algorithms=[settings.jwt_algorithm])
     return result
