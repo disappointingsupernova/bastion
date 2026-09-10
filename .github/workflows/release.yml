@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create GitHub release
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install build
+
+      - name: Build source distribution
+        run: python -m build --sdist
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract changelog entry
+        id: changelog
+        run: |
+          python3 - <<'EOF'
+          import re, os
+          with open("CHANGELOG.md") as f:
+              content = f.read()
+          # Extract the first versioned section
+          match = re.search(
+              r"## \[[\d.]+\].*?\n(.*?)(?=\n## \[|\Z)",
+              content,
+              re.DOTALL,
+          )
+          notes = match.group(1).strip() if match else "See CHANGELOG.md for details."
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"notes<<EOF\n{notes}\nEOF\n")
+          EOF
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Bastion ${{ github.ref_name }}"
+          body: ${{ steps.changelog.outputs.notes }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc.') }}
+          files: dist/*.tar.gz
+          generate_release_notes: false
