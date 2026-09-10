@@ -60,6 +60,7 @@ dependencies = [
 
 [project.scripts]
 bastion = "cli.main:app"
+bastion-admin = "cli.admin:app"
 
 [tool.setuptools.packages.find]
 where = ["."]

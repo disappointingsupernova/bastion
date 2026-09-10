@@ -110,14 +110,21 @@ log "Installing Python dependencies..."
 sudo -u "$BASTION_USER" "$BASTION_ROOT/venv/bin/pip" install --quiet --upgrade pip
 sudo -u "$BASTION_USER" "$BASTION_ROOT/venv/bin/pip" install --quiet -r "$BASTION_ROOT/app/requirements.txt"
 
-# ── CLI symlink ───────────────────────────────────────────────────────────────
-log "Installing bastion CLI..."
+# ── CLI symlinks ─────────────────────────────────────────────────────────────
+log "Installing bastion CLI tools..."
 cat > /usr/local/bin/bastion << 'EOF'
 #!/usr/bin/env bash
 # Bastion CLI wrapper — runs as the current user via the API socket
 exec /opt/bastion/venv/bin/python -m cli.main "$@"
 EOF
 chmod 755 /usr/local/bin/bastion
+
+cat > /usr/local/bin/bastion-admin << 'EOF'
+#!/usr/bin/env bash
+# Bastion Admin CLI wrapper — requires bastion group membership
+exec /opt/bastion/venv/bin/python -m cli.admin "$@"
+EOF
+chmod 755 /usr/local/bin/bastion-admin
 
 # ── Environment file ──────────────────────────────────────────────────────────
 if [[ ! -f "$BASTION_ROOT/.env" ]]; then
