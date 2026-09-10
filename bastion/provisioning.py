@@ -34,8 +34,10 @@ async def _run(
     """Run a command on the remote server and return the result."""
     result = await conn.run(command, check=False)
     if check and result.returncode != 0:
+        stderr = result.stderr
         raise RuntimeError(
-            f"Remote command failed (exit {result.returncode}): {command!r}\n{result.stderr}"
+            f"Remote command failed (exit {result.returncode}): {command!r}\n"
+            f"{stderr.decode() if isinstance(stderr, bytes) else stderr}"
         )
     log.debug("Remote command executed", command=command, exit_code=result.returncode)
     return result
@@ -120,7 +122,11 @@ async def apply_ssh_hardening(
     # Validate config before restarting
     result = await _run(conn, "sshd -t", check=False)
     if result.returncode != 0:
-        raise RuntimeError(f"sshd config validation failed: {result.stderr}")
+        stderr = result.stderr
+        raise RuntimeError(
+            f"sshd config validation failed: "
+            f"{stderr.decode() if isinstance(stderr, bytes) else stderr}"
+        )
 
     await _run(conn, "systemctl restart sshd")
     log.info("SSH hardening applied and sshd restarted")
@@ -134,6 +140,8 @@ async def get_available_updates(
 
     Returns a list of dicts with 'name', 'installed_version', and 'available_version'.
     """
+    packages: list[dict[str, str]] = []
+
     if os_family == "debian":
         await _run(conn, "apt-get update -qq")
         result = await _run(
@@ -141,8 +149,11 @@ async def get_available_updates(
             "apt list --upgradable 2>/dev/null | grep -v 'Listing...' | "
             "awk -F'[/ ]' '{print $1\"|\"$3\"|\"$5}'",
         )
-        packages = []
-        for line in result.stdout.strip().splitlines():
+        stdout = result.stdout
+        if stdout is None:
+            return packages
+        text = stdout.decode() if isinstance(stdout, bytes) else stdout
+        for line in text.strip().splitlines():
             parts = line.split("|")
             if len(parts) == 3:
                 packages.append(
@@ -154,13 +165,16 @@ async def get_available_updates(
                 )
         return packages
 
-    elif os_family == "rhel":
+    if os_family == "rhel":
         result = await _run(
             conn,
             "yum check-update --quiet 2>/dev/null | awk 'NF==3 {print $1\"|\"$2}' || true",
         )
-        packages = []
-        for line in result.stdout.strip().splitlines():
+        stdout = result.stdout
+        if stdout is None:
+            return packages
+        text = stdout.decode() if isinstance(stdout, bytes) else stdout
+        for line in text.strip().splitlines():
             parts = line.split("|")
             if len(parts) == 2:
                 packages.append(
@@ -173,7 +187,7 @@ async def get_available_updates(
         return packages
 
     log.warning("Unknown OS family — cannot check for updates", os_family=os_family)
-    return []
+    return packages
 
 
 async def apply_updates(
@@ -203,7 +217,10 @@ async def apply_updates(
 
     result = await _run(conn, cmd)
     log.info("Package updates applied", os_family=os_family, packages=package_names)
-    return result.stdout
+    stdout = result.stdout
+    if stdout is None:
+        return ""
+    return stdout.decode() if isinstance(stdout, bytes) else stdout
 
 
 async def reboot_server(conn: asyncssh.SSHClientConnection, delay_seconds: int = 60) -> None:
