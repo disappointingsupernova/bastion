@@ -69,9 +69,7 @@ class TestEmailMfaCodes:
         await create_email_mfa_code(db_session, user.id)
 
         # Manually expire the code
-        result = await db_session.execute(
-            select(MfaCode).where(MfaCode.user_id == user.id)
-        )
+        result = await db_session.execute(select(MfaCode).where(MfaCode.user_id == user.id))
         mfa_entry = result.scalar_one()
         mfa_entry.expires_at = datetime.now(tz=UTC) - timedelta(minutes=1)
         await db_session.flush()
@@ -87,9 +85,7 @@ class TestEmailMfaCodes:
         user = await self._make_user(db_session)
         code = await create_email_mfa_code(db_session, user.id)
 
-        result = await db_session.execute(
-            select(MfaCode).where(MfaCode.user_id == user.id)
-        )
+        result = await db_session.execute(select(MfaCode).where(MfaCode.user_id == user.id))
         entry = result.scalar_one()
         assert entry.code_hash != code
         assert len(entry.code_hash) == 64  # SHA-256 hex digest
@@ -102,9 +98,7 @@ class TestEmailMfaCodes:
         await create_email_mfa_code(db_session, user.id)
         await create_email_mfa_code(db_session, user.id)
 
-        result = await db_session.execute(
-            select(MfaCode).where(MfaCode.user_id == user.id)
-        )
+        result = await db_session.execute(select(MfaCode).where(MfaCode.user_id == user.id))
         entries = result.scalars().all()
         assert len(entries) == 2
         assert entries[0].code_hash != entries[1].code_hash

@@ -25,9 +25,7 @@ class TestOnboardServer:
         assert data["hardening_applied"] is False
         assert data["status"] == "active"
 
-    async def test_duplicate_hostname_rejected(
-        self, admin_client: AsyncClient, admin_token: str
-    ):
+    async def test_duplicate_hostname_rejected(self, admin_client: AsyncClient, admin_token: str):
         """Onboarding a server with a duplicate hostname must return 409."""
         payload = {"hostname": "dup.example.com"}
         headers = {"Authorization": f"Bearer {admin_token}"}
@@ -35,9 +33,7 @@ class TestOnboardServer:
         response = await admin_client.post("/servers/", json=payload, headers=headers)
         assert response.status_code == 409
 
-    async def test_non_admin_cannot_onboard(
-        self, admin_client: AsyncClient, user_token: str
-    ):
+    async def test_non_admin_cannot_onboard(self, admin_client: AsyncClient, user_token: str):
         """A non-admin must not be able to onboard a server."""
         response = await admin_client.post(
             "/servers/",
@@ -48,19 +44,13 @@ class TestOnboardServer:
 
     async def test_unauthenticated_onboard_rejected(self, admin_client: AsyncClient):
         """An unauthenticated request must return 401."""
-        response = await admin_client.post(
-            "/servers/", json={"hostname": "anon.example.com"}
-        )
+        response = await admin_client.post("/servers/", json={"hostname": "anon.example.com"})
         assert response.status_code == 401
 
-    async def test_proxy_jump_server_resolved(
-        self, admin_client: AsyncClient, admin_token: str
-    ):
+    async def test_proxy_jump_server_resolved(self, admin_client: AsyncClient, admin_token: str):
         """Onboarding with a valid proxy_jump_hostname must link the jump server."""
         headers = {"Authorization": f"Bearer {admin_token}"}
-        await admin_client.post(
-            "/servers/", json={"hostname": "jump.example.com"}, headers=headers
-        )
+        await admin_client.post("/servers/", json={"hostname": "jump.example.com"}, headers=headers)
         response = await admin_client.post(
             "/servers/",
             json={"hostname": "behind.example.com", "proxy_jump_hostname": "jump.example.com"},

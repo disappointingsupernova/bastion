@@ -26,9 +26,7 @@ class TestAuditLog:
         """The persisted audit entry must be retrievable by action."""
         await audit(db_session, "user.login", success=True, ip_address="1.2.3.4")
 
-        result = await db_session.execute(
-            select(AuditLog).where(AuditLog.action == "user.login")
-        )
+        result = await db_session.execute(select(AuditLog).where(AuditLog.action == "user.login"))
         rows = result.scalars().all()
         assert len(rows) == 1
         assert rows[0].ip_address == "1.2.3.4"

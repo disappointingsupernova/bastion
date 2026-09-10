@@ -12,9 +12,7 @@ from httpx import AsyncClient
 class TestListCertificates:
     """Tests for GET /certificates/."""
 
-    async def test_empty_list_when_no_certs(
-        self, admin_client: AsyncClient, admin_token: str
-    ):
+    async def test_empty_list_when_no_certs(self, admin_client: AsyncClient, admin_token: str):
         """Certificate list must be empty when no certs have been issued."""
         response = await admin_client.get(
             "/certificates/", headers={"Authorization": f"Bearer {admin_token}"}
@@ -120,18 +118,14 @@ class TestListCertificates:
         assert len(certs) == 1
         assert certs[0]["status"] == "revoked"
 
-    async def test_auditor_can_list_certs(
-        self, admin_client: AsyncClient, auditor_token: str
-    ):
+    async def test_auditor_can_list_certs(self, admin_client: AsyncClient, auditor_token: str):
         """An auditor must be able to list certificates."""
         response = await admin_client.get(
             "/certificates/", headers={"Authorization": f"Bearer {auditor_token}"}
         )
         assert response.status_code == 200
 
-    async def test_regular_user_cannot_list_certs(
-        self, admin_client: AsyncClient, user_token: str
-    ):
+    async def test_regular_user_cannot_list_certs(self, admin_client: AsyncClient, user_token: str):
         """A regular user must not be able to list certificates via the admin API."""
         response = await admin_client.get(
             "/certificates/", headers={"Authorization": f"Bearer {user_token}"}
@@ -239,9 +233,7 @@ class TestAuditLog:
         assert entries[0]["action"] == "test.action"
         assert entries[0]["success"] is True
 
-    async def test_filter_by_action(
-        self, admin_client: AsyncClient, admin_token: str, db_session
-    ):
+    async def test_filter_by_action(self, admin_client: AsyncClient, admin_token: str, db_session):
         """Filtering by action must return only matching entries."""
         from bastion.audit import audit
 
@@ -275,9 +267,7 @@ class TestAuditLog:
         entries = response.json()
         assert all(e["success"] is False for e in entries)
 
-    async def test_auditor_can_query_audit_log(
-        self, admin_client: AsyncClient, auditor_token: str
-    ):
+    async def test_auditor_can_query_audit_log(self, admin_client: AsyncClient, auditor_token: str):
         """An auditor must be able to query the audit log."""
         response = await admin_client.get(
             "/audit/", headers={"Authorization": f"Bearer {auditor_token}"}

@@ -192,9 +192,7 @@ def auditor_token(auditor_user) -> str:
     """Return a valid JWT access token for the test auditor user."""
     from bastion.auth import create_access_token
 
-    return create_access_token(
-        auditor_user.id, auditor_user.username, auditor_user.role.value
-    )
+    return create_access_token(auditor_user.id, auditor_user.username, auditor_user.role.value)
 
 
 @pytest.fixture

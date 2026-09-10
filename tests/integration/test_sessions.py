@@ -271,9 +271,7 @@ class TestConnectSession:
         db_session.add(server)
         await db_session.flush()
 
-        db_session.add(
-            ServerAccess(user_id=regular_user.id, server_id=server.id)
-        )
+        db_session.add(ServerAccess(user_id=regular_user.id, server_id=server.id))
         await db_session.flush()
 
         response = await api_client.post(

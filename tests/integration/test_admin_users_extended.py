@@ -39,9 +39,7 @@ class TestListUsers:
         )
         assert response.status_code == 200
 
-    async def test_regular_user_cannot_list_users(
-        self, admin_client: AsyncClient, user_token: str
-    ):
+    async def test_regular_user_cannot_list_users(self, admin_client: AsyncClient, user_token: str):
         """A regular user must not be able to list users via the admin API."""
         response = await admin_client.get(
             "/users/", headers={"Authorization": f"Bearer {user_token}"}
