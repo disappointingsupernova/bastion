@@ -55,8 +55,6 @@ graph TB
     W1 -->|offload recordings| S3
     W2 -->|offload recordings| S3
     BEAT1 -->|schedules tasks| REDIS
-
-    note1[Only one node should\nrun Celery Beat]
 ```
 
 > **Note:** Only one node should run `bastion-beat`. Running multiple beat instances will cause duplicate task execution.
@@ -71,6 +69,7 @@ graph TB
 | Redis | Redis 7.x, shared across all nodes |
 | Session recordings | S3 or NFS — local storage is not permitted in HA mode |
 | Node IDs | Each node must have a unique `NODE_ID` in its `.env` |
+| CA keypair | All nodes must share the same CA keypair |
 
 ---
 
@@ -103,12 +102,13 @@ RECORDINGS_S3_BUCKET=my-bastion-recordings
 
 ### 3. Share the CA keypair
 
-All nodes must use the **same CA keypair**. Copy the CA keys from the first node to all subsequent nodes:
+All nodes must use the **same CA keypair and passphrase**. Copy the CA keys from the first node to all subsequent nodes:
 
 ```bash
 # On node 1:
 sudo cat /opt/bastion/ca/bastion_ca
 sudo cat /opt/bastion/ca/bastion_ca.pub
+sudo grep CA_KEY_PASSPHRASE /opt/bastion/.env
 
 # On node 2 (as root):
 mkdir -p /opt/bastion/ca
@@ -118,6 +118,7 @@ chmod 700 /opt/bastion/ca
 chmod 600 /opt/bastion/ca/bastion_ca
 chmod 644 /opt/bastion/ca/bastion_ca.pub
 chown -R bastion:bastion /opt/bastion/ca
+# Also set CA_KEY_PASSPHRASE in /opt/bastion/.env on node 2
 ```
 
 ### 4. Run the install script on each node
@@ -149,15 +150,28 @@ sudo -u bastion PYTHONPATH=/opt/bastion/app \
 
 ---
 
+## Cluster Health
+
+Each node registers a heartbeat every minute in the `bastion_nodes` table. The admin health dashboard (`GET /health/dashboard`) shows all registered nodes and whether each is alive (heartbeat within the last 2 minutes).
+
+---
+
 ## KRL Distribution
 
-In HA mode, the KRL file is rebuilt on whichever node processes a revocation request. The KRL must be distributed to all remote servers. Options:
+In HA mode, the KRL file is rebuilt on whichever node processes a revocation request. The KRL is then distributed to all managed servers automatically via the `distribute_krl` Celery task (triggered immediately after revocation and on a 30-minute schedule).
+
+For the KRL to be consistent across nodes, all nodes should share the same CA directory. Options:
 
 1. **Shared NFS mount** — mount the same NFS share at `/opt/bastion/ca/` on all nodes
-2. **Periodic sync** — use a cron job or Celery task to sync the KRL from the database to all nodes
-3. **OCSP-style endpoint** — a future enhancement
+2. **Celery task distribution** — the `distribute_krl` task runs on any available worker and pushes the KRL from the database to all managed servers directly
 
-For now, the simplest approach is to mount the CA directory from shared NFS storage.
+---
+
+## Audit Chain in HA Mode
+
+The audit log uses an HMAC-SHA256 integrity chain. In HA mode with concurrent writes from multiple nodes, the chain ordering is best-effort — two nodes may write entries with the same previous hash if they flush simultaneously. The chain still provides tamper-evidence per-entry, but the strict sequential ordering guarantee applies only within a single node's write stream.
+
+Use `GET /audit/verify-chain` to check chain integrity. A broken chain in HA mode may indicate concurrent writes rather than tampering — check the `node_id` field on surrounding entries.
 
 ---
 

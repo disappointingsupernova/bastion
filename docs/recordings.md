@@ -49,7 +49,7 @@ sequenceDiagram
     alt RECORDINGS_AGE_PUBLIC_KEY set
         API->>Age: Encrypt .cast → .cast.age
         Age->>Disk: Write .cast.age
-        Age->>Disk: Securely overwrite and delete .cast
+        Age->>Disk: Overwrite and delete .cast
         API->>API: Update session.recording_path to .cast.age
         API->>API: Set session.recording_encrypted = true
     end
@@ -66,7 +66,7 @@ sequenceDiagram
 
 ## Encryption
 
-Recordings are encrypted using [age](https://age-encryption.org/) — a modern, simple file encryption tool using X25519 asymmetric encryption.
+Recordings are encrypted using [age](https://age-encryption.org/) — a modern file encryption tool using X25519 asymmetric encryption.
 
 Asymmetric encryption means:
 - The bastion can **encrypt** recordings using only the public key
@@ -84,7 +84,7 @@ age-keygen -o bastion-recordings.key
 - Set `RECORDINGS_AGE_PUBLIC_KEY` in `.env` to the public key (`age1...` string)
 - Store `bastion-recordings.key` securely offline — this is required to decrypt recordings
 
-### Decrypting a recording
+### Decrypting a recording manually
 
 ```bash
 age --decrypt -i bastion-recordings.key \
@@ -97,6 +97,45 @@ age --decrypt -i bastion-recordings.key \
 ```bash
 asciinema play session.cast
 ```
+
+---
+
+## Admin Playback API
+
+Admins can stream decrypted recordings directly via the admin API without needing to copy files off the bastion host.
+
+### Using a custom age identity
+
+```bash
+# POST /sessions/{session_id}/playback
+# Body: { "age_identity": "AGE-SECRET-KEY-1..." }
+```
+
+The admin provides their age private key in the request body. It is used immediately for decryption and never stored. Each decryption event is logged in the `recording_decrypt_logs` table with the admin's key fingerprint.
+
+### Using a derived key (recommended)
+
+If `RECORDINGS_MASTER_KEY` is configured, each admin has a unique derived key (HMAC-SHA256 of master key + admin user ID). No private key transmission is required.
+
+```bash
+# GET /sessions/{session_id}/playback/derived
+```
+
+This endpoint only works if recordings were encrypted with the admin's derived public key. Use the custom identity endpoint for recordings encrypted with a standalone age keypair.
+
+All decryption events are logged regardless of which endpoint is used.
+
+---
+
+## Live Session Tailing
+
+Admins can stream the live output of an active session as Server-Sent Events:
+
+```bash
+# GET /sessions/{session_id}/tail
+```
+
+Each SSE event contains a chunk of terminal output as it is written. The stream ends with `data: [SESSION_ENDED]` when the session terminates.
 
 ---
 
@@ -144,14 +183,17 @@ Individual users or servers cannot selectively disable recording — it is an al
 
 ## HA Mode
 
-In HA mode, local recording storage is not permitted — recordings must be offloaded to S3 or NFS so that all nodes can access them. The service will refuse to start in HA mode with `RECORDINGS_STORAGE=local`.
+In HA mode, local recording storage is not permitted — recordings must be offloaded to S3 or NFS so that all nodes can access them.
 
 ---
 
-## Accessing Recordings
+## Decrypt Audit Log
 
-Recordings are referenced in the session record by path. Admins and auditors can query session records via the audit API to find recording paths.
+Every time a recording is decrypted via the admin API, a `RecordingDecryptLog` entry is created containing:
 
-Direct access to recording files requires membership of the `bastion` group (admin) or direct filesystem access as the `bastion` user.
+- The session ID
+- The admin user ID
+- A fingerprint of the key used (first 16 hex chars of SHA-256 of the key)
+- The timestamp
 
-Future versions will include a recording playback API endpoint.
+This provides a full audit trail of who decrypted which recording and when.

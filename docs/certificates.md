@@ -20,7 +20,7 @@ sequenceDiagram
     CLI->>API: POST /sessions/connect {public_key, hostname}
     API->>DB: Verify user has access to server
     API->>DB: Increment serial counter
-    API->>CA: ssh-keygen -s bastion_ca -I key-id -n principals -V +8h -z serial user.pub
+    API->>CA: ssh-keygen -s bastion_ca -P <passphrase> -I key-id -n principals -V +8h -z serial user.pub
     CA-->>API: Signed certificate bytes
     API->>DB: Store certificate record
     API-->>CLI: {certificate, hostname, port, remote_username}
@@ -36,17 +36,32 @@ sequenceDiagram
 
 ## Certificate Properties
 
-Each issued certificate has the following properties:
+Each issued user certificate has the following properties:
 
 | Property | Value |
 |---|---|
-| Key type | Ed25519 (user must provide an Ed25519 public key) |
 | Certificate type | SSH user certificate |
 | Validity | 8 hours by default (configurable via `SSH_CERT_VALIDITY_HOURS`) |
 | Principals | Set to the user's remote username on the target server |
-| Key ID | `bastion-<username>-<serial>` |
-| Serial | Monotonically increasing, stored in the database |
-| Extensions | `permit-pty`, `permit-user-rc` |
+| Key ID | `bastion-<serial>` |
+| Serial | Monotonically increasing, stored in the `cert_serials` table |
+
+Accepted public key types: `ssh-ed25519`, `ecdsa-sha2-nistp256`, `ecdsa-sha2-nistp384`, `ecdsa-sha2-nistp521`, `ssh-rsa`. Maximum key size: 8192 bytes.
+
+---
+
+## Host Certificates
+
+Bastion can also issue SSH host certificates for managed servers. Host certificates allow remote servers to prove their identity to clients using the Bastion CA, eliminating the `known_hosts` problem on first connect.
+
+Issue a host certificate via the admin API:
+
+```bash
+# POST /certificates/host
+# Body: { "hostname": "server1.example.com", "host_public_key": "ssh-ed25519 AAAA...", "validity_hours": 192 }
+```
+
+The certificate is returned in the response and never written to disk on the bastion. Default validity is `SSH_CERT_VALIDITY_HOURS * 24` (8 days).
 
 ---
 
@@ -56,12 +71,12 @@ The CA uses an Ed25519 keypair stored at `/opt/bastion/ca/`:
 
 ```
 /opt/bastion/ca/
-├── bastion_ca        Ed25519 private key — mode 600, bastion user only
+├── bastion_ca        Ed25519 private key — mode 600, bastion user only, passphrase-encrypted
 ├── bastion_ca.pub    Ed25519 public key — mode 644, distribute to remote servers
 └── krl               Key Revocation List — mode 644
 ```
 
-The private key is generated during installation and is never transmitted over the network. It is only ever read by the `bastion` system user.
+The private key is generated during installation, encrypted with a passphrase stored in `/opt/bastion/.env` as `CA_KEY_PASSPHRASE`. The passphrase is passed to `ssh-keygen` at signing time — the key is never decrypted to disk.
 
 ### Backing up the CA key
 
@@ -72,7 +87,7 @@ The CA private key is the most critical secret in the system. If it is lost, all
 sudo cat /opt/bastion/ca/bastion_ca
 ```
 
-Store this in a password manager, encrypted USB drive, or secrets manager.
+Store this in a password manager, encrypted USB drive, or secrets manager. Also back up `CA_KEY_PASSPHRASE` from `/opt/bastion/.env`.
 
 ---
 
@@ -98,25 +113,10 @@ Add to `/etc/ssh/sshd_config.d/99-bastion.conf`:
 
 ```
 TrustedUserCAKeys /etc/ssh/bastion_ca.pub
-```
-
-### 3. Configure KRL checking
-
-The KRL must be distributed to remote servers and checked on every connection. Add to the sshd config:
-
-```
 RevokedKeys /etc/ssh/bastion_krl
 ```
 
-The KRL file must be kept up to date. The bastion provisioning module handles distribution. For manual distribution:
-
-```bash
-# Copy the KRL to the remote server
-scp /opt/bastion/ca/krl root@server1.example.com:/etc/ssh/bastion_krl
-chmod 644 /etc/ssh/bastion_krl
-```
-
-### 4. Restart sshd
+### 3. Restart sshd
 
 ```bash
 sshd -t && systemctl restart sshd
@@ -136,7 +136,9 @@ stateDiagram-v2
 
     note right of Revoked
         KRL is rebuilt immediately
-        on revocation
+        on revocation.
+        KRL distribution task
+        queued automatically.
     end note
 ```
 
@@ -154,10 +156,19 @@ bastion-admin cert revoke <cert-id> --reason "User account compromised"
 
 This:
 1. Marks the certificate as `REVOKED` in the database
-2. Rebuilds the KRL from all revoked certificate serials
-3. Writes the new KRL to `/opt/bastion/ca/krl`
+2. Terminates any active sessions that used this certificate
+3. Rebuilds the KRL from all revoked certificate serials
+4. Queues a `distribute_krl` Celery task to push the KRL to all managed servers
 
-The KRL must then be distributed to all remote servers. This is handled by the provisioning module, or can be done manually:
+### KRL distribution
+
+The KRL is distributed automatically:
+- Immediately after every revocation (via Celery task)
+- On a 30-minute schedule (periodic Celery beat task)
+
+The distribution task connects to all active, hardened servers and writes the KRL to `/etc/ssh/bastion_krl`. It verifies the file size after writing to confirm delivery.
+
+For manual distribution:
 
 ```bash
 for server in server1.example.com server2.example.com; do
@@ -182,8 +193,9 @@ bastion-admin cert revoke <cert-id> --reason "User account suspended"
 ## Security Considerations
 
 - Certificates are **never written to disk** on the bastion server — they are returned in the API response and written to a temporary directory by the CLI, which is deleted on exit
-- The CA private key is readable only by the `bastion` system user (mode `600`)
-- Certificate validity is short (8 hours by default) to limit the window of exposure if a certificate is compromised
+- The CA private key is readable only by the `bastion` system user (mode `600`) and is encrypted with a passphrase
+- Certificate validity is short (8 hours by default) to limit the window of exposure
 - The KRL provides immediate revocation — a revoked certificate is rejected on the next connection attempt, even within its validity window
 - Certificate serials are monotonically increasing and stored in the database, making it impossible to issue duplicate serials
 - All certificate issuance and revocation events are written to the audit log
+- All outbound SSH connections from the bastion use CA-based host verification, preventing MITM attacks

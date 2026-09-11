@@ -10,7 +10,7 @@ This document describes the security model, design decisions, and threat mitigat
 2. **No standing access** — SSH certificates expire after 8 hours. There are no permanent `authorized_keys` entries on remote servers.
 3. **Least privilege** — users are granted access per-server, not globally. Sudo is opt-in per access grant.
 4. **Defence in depth** — multiple independent controls protect each resource.
-5. **Full auditability** — every action is logged before and after execution.
+5. **Full auditability** — every action is logged before and after execution with a tamper-evident HMAC chain.
 
 ---
 
@@ -51,25 +51,27 @@ All passwords are hashed with bcrypt at cost factor 12. This is deliberately slo
 
 - Access tokens expire after 60 minutes (configurable)
 - Refresh tokens expire after 7 days (configurable)
-- Tokens are signed with HMAC-SHA256 using the `SECRET_KEY`
-- The `SECRET_KEY` is derived into a Fernet key for encrypting secrets at rest
+- Tokens are signed with HMAC-SHA256 (`HS256`) using the `SECRET_KEY`
+- The algorithm is fixed to `HS256` — it cannot be overridden via configuration
+- The `SECRET_KEY` must be at least 32 bytes; the service rejects shorter values at startup
 
 ### MFA
 
-Two MFA methods are supported:
+Three MFA methods are supported:
 
 | Method | Security |
 |---|---|
-| TOTP | Time-based one-time passwords (RFC 6238). Compatible with any authenticator app. The TOTP secret is encrypted at rest using Fernet. |
-| Email | 6-digit codes with a 10-minute expiry. Codes are stored as SHA-256 hashes — the plaintext is never persisted. |
-
-### Rate limiting
-
-Authentication endpoints are rate-limited to 10 requests per minute per IP address (configurable). Exceeding the limit returns `429 Too Many Requests`.
+| TOTP | Time-based one-time passwords (RFC 6238). Compatible with any authenticator app. The TOTP secret is encrypted at rest using Fernet. A 30-second window is allowed. |
+| Email | 6-digit codes with a 10-minute expiry. Codes are stored as HMAC-SHA256 hashes keyed to the user ID — the plaintext is never persisted. |
+| FIDO2 / WebAuthn | Hardware security key authentication (phishing-resistant). Credentials are stored encrypted in the database. Sign count validation detects cloned authenticators. |
 
 ### Account lockout
 
-After repeated failed login attempts, the anomaly detection engine scores the event and may trigger an alert. Future versions will add configurable account lockout.
+After 10 consecutive failed login attempts, the account is locked for 15 minutes. The lockout threshold and duration are hardcoded constants in the auth router.
+
+### Rate limiting
+
+Authentication endpoints are rate-limited to 10 requests per minute per IP address (configurable via `RATE_LIMIT_AUTH_PER_MINUTE`). Exceeding the limit returns `429 Too Many Requests`.
 
 ---
 
@@ -77,7 +79,7 @@ After repeated failed login attempts, the anomaly detection engine scores the ev
 
 ```mermaid
 flowchart LR
-    PK[User public key] -->|signed by| CA[CA private key\nmode 600\nbastion user only]
+    PK[User public key] -->|signed by| CA[CA private key\nmode 600\nbastion user only\npassphrase-encrypted]
     CA --> CERT[Signed certificate\n8h validity\nper-user principals]
     CERT -->|returned in API response| CLI[CLI tmpdir\nmode 600]
     CLI -->|exec ssh| REMOTE[Remote server]
@@ -86,18 +88,20 @@ flowchart LR
 ```
 
 - Certificates are **never written to disk** on the bastion server
-- The CA private key is readable only by the `bastion` system user (mode `600`)
+- The CA private key is readable only by the `bastion` system user (mode `600`) and is encrypted with a passphrase set via `CA_KEY_PASSPHRASE`
+- The passphrase is passed to `ssh-keygen` at signing time — the key is never decrypted to disk
 - Certificates expire after 8 hours — there is no permanent access
 - The KRL provides immediate revocation — a revoked certificate is rejected on the next connection attempt
 - Certificate principals are scoped to the specific remote username, not a wildcard
+- Host certificates are also supported, allowing remote servers to prove their identity using the Bastion CA
 
 ---
 
 ## Secrets at Rest
 
-All secrets stored in the database (TOTP secrets, alert channel credentials) are encrypted using Fernet (AES-128-CBC + HMAC-SHA256). The encryption key is derived from `SECRET_KEY` using PBKDF2-HMAC-SHA256 with 600,000 iterations.
+All secrets stored in the database (TOTP secrets, FIDO2 credentials, alert channel configuration) are encrypted using Fernet (AES-128-CBC + HMAC-SHA256). The encryption key is derived from `SECRET_KEY` using PBKDF2-HMAC-SHA256 with 600,000 iterations and a per-installation salt derived via HMAC-SHA256.
 
-The `SECRET_KEY` itself is stored only in `/opt/bastion/.env` (mode `600`, owned by `bastion`).
+The `SECRET_KEY` itself is stored only in `/opt/bastion/.env` (mode `600`, owned by `bastion`). A minimum length of 32 bytes is enforced at startup.
 
 ---
 
@@ -105,9 +109,11 @@ The `SECRET_KEY` itself is stored only in `/opt/bastion/.env` (mode `600`, owned
 
 - Recordings are stored at `/opt/bastion/recordings/` (mode `750`, owned by `bastion`)
 - If `RECORDINGS_AGE_PUBLIC_KEY` is set, recordings are encrypted with `age` (X25519 asymmetric encryption) immediately on session completion
-- The plaintext recording file is securely overwritten with random bytes before deletion
+- The plaintext recording file is overwritten with random bytes before deletion (best-effort; SSD wear-levelling means this is not guaranteed — the primary protection is age encryption)
 - The `age` private key is never stored on the bastion host — it is held offline by the operator
 - Even if the bastion host is fully compromised, recordings cannot be decrypted without the offline private key
+- All recording decryption events are logged in the `recording_decrypt_logs` table with the admin's key fingerprint
+- A master key (`RECORDINGS_MASTER_KEY`) can be configured to derive per-admin decrypt keys server-side, avoiding the need to transmit private keys over the API
 
 ---
 
@@ -122,12 +128,17 @@ ChallengeResponseAuthentication no
 X11Forwarding no
 AllowGroups bastion-users
 TrustedUserCAKeys /etc/ssh/bastion_ca.pub
+AuthorizedPrincipalsCommand /usr/bin/bastion-principals %u
+AuthorizedPrincipalsCommandUser nobody
 ```
 
 Additionally:
 - Users are created with no password (SSH cert auth only)
 - Sudo is granted only where explicitly configured, using a per-user sudoers drop-in file
 - The `bastion-users` group is required for SSH access
+- The KRL is distributed to all managed servers automatically after every revocation and on a 30-minute schedule
+
+All SSH connections from the bastion to remote servers use CA-based host verification (`@cert-authority`) rather than `known_hosts=None`, preventing MITM attacks on managed servers.
 
 ---
 
@@ -166,12 +177,9 @@ dpkg-reconfigure -plow unattended-upgrades
 
 ## Audit Trail
 
-Every action in the system is written to the `audit_logs` table:
+Every action in the system is written to the `audit_logs` table. Each entry is signed with an HMAC-SHA256 that chains to the previous entry's hash, forming a tamper-evident append-only log. Any modification to a past entry breaks the chain from that point forward.
 
-- Before the action is performed (with `success=false` initially)
-- After the action completes (with the final `success` value)
-
-Audit log entries are immutable — they are never updated or deleted. The table has no soft-delete mechanism.
+Audit log entries are immutable — they are never updated or deleted.
 
 Logged actions include:
 
@@ -181,6 +189,9 @@ Logged actions include:
 | `auth.login.mfa_required` | MFA challenge issued |
 | `auth.mfa.verify` | MFA code verification |
 | `auth.totp.setup` | TOTP secret generated |
+| `auth.totp.verify` | TOTP activation confirmed |
+| `auth.fido2.register` | FIDO2 credential registered |
+| `auth.fido2.authenticate` | FIDO2 authentication completed |
 | `cert.issue` | SSH certificate issued |
 | `session.connect` | SSH session initiated |
 | `session.connect.denied` | Access denied to a server |
@@ -196,6 +207,41 @@ Logged actions include:
 | `admin.server.reboot` | Reboot task queued |
 | `admin.server.packages.update` | Package update task queued |
 | `admin.cert.revoke` | Certificate revoked |
+| `admin.cert.host.issue` | Host certificate issued |
+| `admin.session.terminate` | Session forcibly terminated by admin |
+| `admin.session.tail` | Admin began live session tail |
+| `admin.session.playback` | Session recording decrypted and streamed |
+| `admin.compliance.report.download` | Compliance report downloaded |
+| `admin.compliance.report.email` | Compliance report emailed |
+| `admin.import.users.csv` | Bulk CSV user import |
+| `admin.import.users.ldap_sync` | LDAP directory sync |
+| `access_request.create` | JIT access request submitted |
+| `access_request.approve` | JIT access request approved |
+| `access_request.deny` | JIT access request denied |
+| `dual_approval.approve` | Dual-approval request approved |
+| `dual_approval.reject` | Dual-approval request rejected |
+
+---
+
+## Dual Approval
+
+When `DUAL_APPROVAL_REQUIRED=true`, privileged actions (granting sudo, revoking certificates, deleting users) require a second admin to approve within the configured window (`DUAL_APPROVAL_WINDOW_MINUTES`, default 30).
+
+When only one admin exists, the initiating admin must re-authenticate with TOTP + email MFA before the action proceeds (single-admin fallback).
+
+---
+
+## Just-in-Time Access
+
+Users with `jit_access_enabled=true` on their account can submit time-limited access requests. Admins approve or deny. Approved access auto-revokes at the configured expiry via a Celery task that runs every 5 minutes.
+
+---
+
+## Anomaly Detection
+
+Every login, session, and certificate issuance is scored against a set of heuristic factors. When the score reaches `ANOMALY_SCORE_ALERT_THRESHOLD` (default 70), an anomaly event is recorded and an alert is dispatched. Scores are computed relative to per-user baselines where available.
+
+See [anomaly.md](anomaly.md) for full details.
 
 ---
 
@@ -203,19 +249,22 @@ Logged actions include:
 
 | Threat | Mitigation |
 |---|---|
-| Compromised user credentials | MFA, short-lived certs, anomaly detection, account lockout |
+| Compromised user credentials | MFA (TOTP, email, FIDO2), short-lived certs, anomaly detection, account lockout |
 | Stolen SSH certificate | 8h expiry, KRL revocation, cert never written to bastion disk |
-| Compromised bastion host | age-encrypted recordings (offline key), CA key backup, audit log in DB |
+| Compromised bastion host | age-encrypted recordings (offline key), CA key passphrase-encrypted, audit log in DB |
 | Privilege escalation on bastion | `bastion` user has no login shell, `NoNewPrivileges=yes` in systemd units |
 | Lateral movement to remote servers | Per-user, per-server access grants, cert principals scoped to remote username |
-| Insider threat | Full audit trail, session recording, anomaly detection |
-| Brute force | Rate limiting, bcrypt cost 12, anomaly scoring |
-| Replay attack | JWT expiry, short-lived certs, TOTP time window |
+| Insider threat | Full audit trail, session recording, anomaly detection, dual approval |
+| Brute force | Rate limiting, bcrypt cost 12, account lockout, anomaly scoring |
+| Replay attack | JWT expiry, short-lived certs, TOTP time window, FIDO2 sign count validation |
 | Data exfiltration via recordings | age asymmetric encryption, offline private key |
 | Denial of service | Rate limiting, Unix socket access control |
+| MITM on managed servers | CA-based host verification on all outbound SSH connections |
+| Cloned FIDO2 authenticator | Sign count validation on every authentication |
+| Audit log tampering | HMAC-SHA256 integrity chain, tamper detection via `/audit/verify-chain` |
 
 ---
 
 ## Reporting Security Issues
 
-Please report security vulnerabilities privately. Do not open public issues for security bugs.
+Please report security vulnerabilities privately via [SECURITY.md](../SECURITY.md). Do not open public issues for security bugs.

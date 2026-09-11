@@ -52,10 +52,11 @@ The user-facing API service. Listens on `/opt/bastion/run/bastion-api.sock`. Onl
 
 | Responsibility | Detail |
 |---|---|
-| Authentication | Password verification, JWT issuance, MFA flow |
+| Authentication | Password verification, JWT issuance, MFA flow (TOTP, email, FIDO2) |
 | Certificate issuance | Signs user public keys with the CA, returns cert in response |
 | Session management | Creates session records, initiates SSH proxy connections |
 | Anomaly evaluation | Scores every login and session for suspicious behaviour |
+| JIT access requests | Users submit and withdraw time-limited access requests |
 
 ### `bastion-admin`
 
@@ -63,13 +64,19 @@ The administrative API service. Listens on `/opt/bastion/run/bastion-admin.sock`
 
 | Responsibility | Detail |
 |---|---|
-| User lifecycle | Create, update, suspend, soft-delete users |
-| Server management | Onboard servers, configure proxy jumps, soft-delete |
-| Access control | Grant and revoke per-user, per-server access with optional sudo |
-| Certificate revocation | Revoke certs by ID, rebuild KRL |
-| Audit queries | Read-only access to the full audit trail |
+| User lifecycle | Create, update, suspend, soft-delete users; bulk CSV import; LDAP sync |
+| Server management | Onboard servers, configure proxy jumps, session policies, IP allowlists |
+| Access control | Grant and revoke per-user and per-group access with optional sudo |
+| Certificate management | Revoke certs by ID, rebuild KRL, issue host certificates |
+| Audit queries | Read-only access to the full audit trail; integrity chain verification |
 | Package management | View available updates, queue update tasks |
 | Provisioning | Queue user provisioning and SSH hardening tasks |
+| Session management | List all sessions, forcibly terminate, live tail, playback recordings |
+| Compliance | Generate and email access matrix, session, cert history, and failed auth reports |
+| User groups | Create groups, manage membership, grant group server access |
+| Dual approval | Review pending privileged action requests |
+| JIT access | Approve or deny just-in-time access requests |
+| Health dashboard | Service metrics, storage, active sessions, cluster node status |
 
 ### `bastion-worker`
 
@@ -78,14 +85,20 @@ Celery worker processes. Handle all background and long-running tasks.
 | Task | Schedule |
 |---|---|
 | Connectivity checks | Every 5 minutes |
-| Package update scans | Every N hours (configurable) |
-| Certificate expiry | Every 15 minutes |
+| Package update scans | Every N hours (configurable via `PACKAGE_CHECK_INTERVAL_HOURS`) |
+| Certificate expiry marking | Every 15 minutes |
 | Anomaly alert dispatch | Every 2 minutes |
-| Recording offload (HA) | On-demand, triggered after session completion |
+| JIT access expiry | Every 5 minutes |
+| SSH key age reminders | Daily at 08:00 UTC |
+| Certificate expiry warnings | Every 15 minutes |
+| KRL distribution | Every 30 minutes |
+| Database backup | Daily at 02:00 UTC |
+| Anomaly baseline refresh | Every 6 hours |
+| Node heartbeat | Every minute |
 
 ### `bastion-beat`
 
-Celery beat scheduler. Triggers periodic tasks on the configured intervals. Stores its schedule in `/opt/bastion/data/celerybeat-schedule`.
+Celery beat scheduler. Triggers periodic tasks on the configured intervals. Stores its schedule in `/opt/bastion/data/celerybeat-schedule`. Only one node should run `bastion-beat` in HA deployments.
 
 ### Shared Library (`bastion/`)
 
@@ -99,12 +112,19 @@ bastion/
 ├── crypto/
 │   ├── ca.py       SSH CA — key generation, cert issuance, KRL
 │   └── encryption.py  age encryption, Fernet secrets at rest
-├── audit/          Audit log writer
+├── audit/          Audit log writer with HMAC integrity chain
 ├── auth.py         JWT, bcrypt, TOTP, email MFA
-├── anomaly.py      Heuristic anomaly scoring
+├── fido2.py        FIDO2 / WebAuthn hardware key authentication
+├── anomaly.py      Heuristic anomaly scoring with per-user baselines
 ├── alerting.py     Multi-channel alert dispatch
 ├── proxy.py        SSH proxy and asciinema session recording
-└── provisioning.py Remote server provisioning over SSH
+├── provisioning.py Remote server provisioning over SSH
+├── recordings.py   Live session tailing and recording playback
+├── session_kill.py Redis pub/sub session termination
+├── ip_allowlist.py CIDR-based IP allowlist enforcement
+├── compliance.py   Compliance report generation (CSV/PDF)
+├── dual_approval.py Dual-approval workflow for privileged actions
+└── client.py       Synchronous admin API client (for IaC/Ansible)
 ```
 
 ---
@@ -127,9 +147,9 @@ sequenceDiagram
     alt MFA enabled
         API-->>CLI: mfa_token
         CLI->>User: Prompt for MFA code
-        User->>CLI: TOTP / email code
-        CLI->>API: POST /auth/mfa/verify
-        API->>DB: Verify code
+        User->>CLI: TOTP / email / FIDO2
+        CLI->>API: POST /auth/mfa/verify or /auth/fido2/authenticate/complete
+        API->>DB: Verify code / credential
     end
     API->>DB: Write audit log (success)
     API-->>CLI: access_token + refresh_token
@@ -138,7 +158,7 @@ sequenceDiagram
     User->>CLI: bastion connect server1.example.com
     CLI->>API: POST /sessions/connect
     API->>DB: Check server exists and is reachable
-    API->>DB: Check user has access grant
+    API->>DB: Check user has access grant (and it has not expired)
     API->>CA: Issue SSH certificate (8h validity)
     API->>DB: Create session record
     API->>DB: Write audit log
@@ -161,16 +181,19 @@ sequenceDiagram
     participant AAPI as bastion-admin
     participant DB as Database
     participant KRL as KRL File
+    participant WORKER as Celery Worker
     participant Remote as Remote Servers
 
     Admin->>ACLI: bastion-admin cert revoke <cert-id>
     ACLI->>AAPI: POST /certificates/<id>/revoke
     AAPI->>DB: Mark certificate as REVOKED
+    AAPI->>DB: Terminate active sessions using this cert
     AAPI->>DB: Write audit log
     AAPI->>KRL: Rebuild KRL from all revoked serials
+    AAPI->>WORKER: Queue distribute_krl task
     AAPI-->>ACLI: 204 No Content
-    Note over KRL,Remote: KRL must be distributed to remote servers
-    Note over KRL,Remote: Remote servers check KRL on every connection
+    WORKER->>Remote: Push KRL via SSH (CA-verified connection)
+    WORKER->>Remote: Verify KRL size after write
 ```
 
 ---
@@ -183,6 +206,10 @@ graph LR
     BEAT -->|every N hours| PT[packages.check_all_servers]
     BEAT -->|every 15 min| ET[certificates.expire_old_certificates]
     BEAT -->|every 2 min| AT[alerts.dispatch_pending_anomaly_alerts]
+    BEAT -->|every 5 min| JIT[access_requests.expire_jit_access]
+    BEAT -->|every 30 min| KRL[notifications.distribute_krl]
+    BEAT -->|daily 02:00| BK[notifications.backup_database]
+    BEAT -->|every 6h| BL[notifications.refresh_anomaly_baselines]
 
     CT -->|update status| DB[(Database)]
     CT -->|if unreachable| ALERT[Alert Dispatch]
@@ -194,12 +221,19 @@ graph LR
 
     AT -->|read unalerted events| DB
     AT --> ALERT
-    ALERT -->|SMTP / SES / Slack\nPagerDuty / Pushover| CHANNELS[Alert Channels]
+    ALERT -->|SMTP / SES / Slack\nPagerDuty / Pushover\nWebhook / Syslog| CHANNELS[Alert Channels]
+
+    JIT -->|revoke expired grants| DB
+    KRL -->|push KRL via SSH| REMOTE
+    BK -->|snapshot DB| S3[S3 / Local]
+    BL -->|update baselines| DB
 ```
 
 ---
 
 ## Database Schema
+
+The full schema is defined in `migrations/versions/0001_initial_schema.py`. Key entities:
 
 ```mermaid
 erDiagram
@@ -212,10 +246,14 @@ erDiagram
         string status
         string mfa_method
         string totp_secret
+        string fido2_credentials
         bool mfa_enabled
         int unix_uid
         datetime last_login_at
+        datetime locked_until
         datetime deleted_at
+        bool jit_access_enabled
+        string ip_allowlist
     }
 
     servers {
@@ -227,6 +265,8 @@ erDiagram
         string proxy_jump_server_id FK
         bool hardening_applied
         datetime deleted_at
+        string ip_allowlist
+        string session_policy
     }
 
     server_access {
@@ -237,6 +277,7 @@ erDiagram
         string remote_username
         bool provisioned
         datetime revoked_at
+        datetime expires_at
     }
 
     ssh_certificates {
@@ -249,6 +290,7 @@ erDiagram
         datetime valid_before
         string status
         datetime revoked_at
+        string revocation_reason
     }
 
     sessions {
@@ -267,12 +309,13 @@ erDiagram
 
     audit_logs {
         string id PK
+        int seq
         string user_id FK
         string action
         string resource_type
         string resource_id
-        string detail
         bool success
+        string integrity_hash
         datetime created_at
     }
 
@@ -287,32 +330,69 @@ erDiagram
         bool resolved
     }
 
-    alert_configs {
+    anomaly_baselines {
         string id PK
-        string channel
-        bool enabled
-        string config_json
-        string min_severity
+        string user_id FK
+        string typical_hours
+        string known_ips
+        float avg_session_duration_seconds
+        float avg_session_bytes
+        int sample_count
     }
 
-    server_packages {
+    access_requests {
         string id PK
+        string user_id FK
         string server_id FK
-        string package_name
-        string installed_version
-        string available_version
-        bool update_available
+        string reason
+        int requested_duration_hours
+        string status
+        datetime expires_at
+        string server_access_id FK
+    }
+
+    dual_approval_requests {
+        string id PK
+        string initiated_by_user_id FK
+        string action_type
+        string action_payload
+        string status
+        datetime expires_at
+        string reviewed_by_user_id FK
+    }
+
+    user_groups {
+        string id PK
+        string name
+        datetime deleted_at
+    }
+
+    recording_decrypt_logs {
+        string id PK
+        string session_id FK
+        string admin_user_id FK
+        string key_fingerprint
+    }
+
+    bastion_nodes {
+        string id PK
+        string node_id
+        string version
+        datetime last_heartbeat_at
+        string load_metrics
     }
 
     users ||--o{ server_access : "has"
     users ||--o{ ssh_certificates : "holds"
     users ||--o{ sessions : "initiates"
     users ||--o{ audit_logs : "generates"
+    users ||--o{ access_requests : "submits"
     servers ||--o{ server_access : "grants"
     servers ||--o{ sessions : "hosts"
     servers ||--o{ server_packages : "tracks"
     servers ||--o| servers : "jumps via"
     sessions ||--o{ anomaly_events : "triggers"
+    sessions ||--o{ recording_decrypt_logs : "logged by"
 ```
 
 ---
@@ -347,8 +427,8 @@ graph TB
 
         subgraph Data Layer
             DB[(Database\nmode 700)]
-            CA[CA Keys\nmode 700]
-            REC[Recordings\nmode 750]
+            CA[CA Keys\nmode 700\npassphrase-encrypted]
+            REC[Recordings\nmode 750\nage-encrypted]
         end
     end
 
@@ -377,6 +457,7 @@ graph TB
     subgraph Node 1
         CLI1[bastion CLI] --> API1[bastion-api]
         API1 --> W1[Celery Worker]
+        BEAT1[Celery Beat]
     end
 
     subgraph Node 2
@@ -396,6 +477,7 @@ graph TB
     W2 --> REDIS
     W1 -->|offload recordings| S3
     W2 -->|offload recordings| S3
+    BEAT1 -->|schedules tasks| REDIS
 ```
 
-See [ha.md](ha.md) for full deployment instructions.
+Only one node should run `bastion-beat`. See [ha.md](ha.md) for full deployment instructions.

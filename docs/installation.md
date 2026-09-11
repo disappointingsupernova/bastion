@@ -26,7 +26,7 @@ The bastion host should be a **dedicated server** — do not run other services 
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-org/bastion /opt/bastion-src
+git clone https://github.com/disappointingsupernova/bastion /opt/bastion-src
 cd /opt/bastion-src
 ```
 
@@ -45,7 +45,8 @@ The script is fully idempotent — it is safe to run multiple times. It will:
 - Copy application code to `/opt/bastion/app/`
 - Install Python dependencies
 - Generate a `SECRET_KEY` and write an initial `.env` file
-- Generate the SSH CA keypair at `/opt/bastion/ca/bastion_ca`
+- Generate the SSH CA keypair at `/opt/bastion/ca/bastion_ca`, encrypted with a generated passphrase
+- Store the CA passphrase in `/opt/bastion/.env` as `CA_KEY_PASSPHRASE`
 - Install and enable systemd service units
 - Apply SSH hardening to the bastion host itself
 
@@ -58,21 +59,22 @@ sudo nano /opt/bastion/.env
 At minimum, review:
 
 - `SECRET_KEY` — auto-generated, do not change after first use
+- `CA_KEY_PASSPHRASE` — auto-generated, back this up alongside the CA key
 - `RECORDINGS_AGE_PUBLIC_KEY` — set this to your `age` public key to enable encrypted recordings
 - `SMTP_*` or `SES_*` — configure at least one alert channel
 
 See [configuration.md](configuration.md) for all available settings.
 
-### 4. Back up the CA private key
+### 4. Back up the CA private key and passphrase
 
 ```bash
-# The CA private key is the most critical secret in the system.
-# If it is lost, all issued certificates become unverifiable.
-# Back it up to a secure offline location immediately.
+# The CA private key and its passphrase are the most critical secrets in the system.
+# If either is lost, all issued certificates become unverifiable.
 sudo cat /opt/bastion/ca/bastion_ca
+sudo grep CA_KEY_PASSPHRASE /opt/bastion/.env
 ```
 
-Store this in a password manager, encrypted USB drive, or secrets manager. **Do not store it in the same location as the bastion host.**
+Store both in a password manager, encrypted USB drive, or secrets manager. **Do not store them in the same location as the bastion host.**
 
 ### 5. Add users to the bastion-users group
 
@@ -115,16 +117,17 @@ echo "<paste public key here>" > /etc/ssh/bastion_ca.pub
 chmod 644 /etc/ssh/bastion_ca.pub
 ```
 
-Then add to `/etc/ssh/sshd_config` (or a drop-in file):
+Then add to `/etc/ssh/sshd_config.d/99-bastion.conf`:
 
 ```
 TrustedUserCAKeys /etc/ssh/bastion_ca.pub
+RevokedKeys /etc/ssh/bastion_krl
 ```
 
 Restart sshd:
 
 ```bash
-systemctl restart sshd
+sshd -t && systemctl restart sshd
 ```
 
 The bastion's provisioning module handles this automatically when you run `bastion-admin server provision <server-id>`.
@@ -158,6 +161,47 @@ bastion-admin access grant --user yourusername --server server1.example.com
 ```bash
 bastion login
 bastion connect server1.example.com
+```
+
+---
+
+## Optional: Enable recording encryption
+
+Generate an age keypair and configure recording encryption:
+
+```bash
+age-keygen -o /secure/offline/bastion-recordings.key
+# Public key: age1...
+```
+
+Add to `/opt/bastion/.env`:
+
+```env
+RECORDINGS_AGE_PUBLIC_KEY=age1...
+```
+
+Restart the services:
+
+```bash
+sudo systemctl restart bastion-api bastion-worker
+```
+
+Store `bastion-recordings.key` securely offline — it is required to decrypt recordings.
+
+---
+
+## Optional: Enable per-admin derived decrypt keys
+
+If you want admins to decrypt recordings via the API without transmitting private keys, configure a master key:
+
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Add to `/opt/bastion/.env`:
+
+```env
+RECORDINGS_MASTER_KEY=<generated-key>
 ```
 
 ---
@@ -207,6 +251,7 @@ journalctl -u bastion-api -n 100 --no-pager
 
 Common causes:
 - Missing or malformed `.env` file
+- `SECRET_KEY` shorter than 32 bytes (rejected at startup)
 - Redis not running (`systemctl start redis-server`)
 - Python dependency not installed (`/opt/bastion/venv/bin/pip install -r /opt/bastion/app/requirements.txt`)
 
@@ -229,12 +274,18 @@ sudo usermod -aG bastion-users yourusername
 If `/opt/bastion/ca/bastion_ca` is missing, regenerate it:
 
 ```bash
+CA_PASSPHRASE=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+echo "CA_KEY_PASSPHRASE=${CA_PASSPHRASE}" >> /opt/bastion/.env
 sudo -u bastion /opt/bastion/venv/bin/python -c "
 import sys; sys.path.insert(0, '/opt/bastion/app')
 from bastion.crypto.ca import generate_ca_keypair
 from pathlib import Path
-generate_ca_keypair(Path('/opt/bastion/ca/bastion_ca'))
+generate_ca_keypair(Path('/opt/bastion/ca/bastion_ca'), passphrase=b'${CA_PASSPHRASE}')
 "
 ```
 
 **Note:** Regenerating the CA key invalidates all previously issued certificates. You must redistribute the new public key to all remote servers.
+
+### Certificate issuance fails
+
+Ensure `CA_KEY_PASSPHRASE` in `/opt/bastion/.env` matches the passphrase used when the CA key was generated. If the passphrase is wrong, `ssh-keygen` will fail with a decryption error.
