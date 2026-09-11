@@ -18,7 +18,7 @@ def expire_jit_access(self) -> None:
 
 
 async def _expire_jit_access() -> None:
-    """Async implementation of JIT access expiry."""
+    """Async implementation of JIT access expiry — covers both JIT requests and direct grants."""
     from sqlalchemy import select
 
     from bastion.db import get_db_session
@@ -27,6 +27,7 @@ async def _expire_jit_access() -> None:
     now = datetime.now(tz=UTC)
 
     async with get_db_session() as db:
+        # Expire JIT access requests
         result = await db.execute(
             select(AccessRequest).where(
                 AccessRequest.status == AccessRequestStatus.APPROVED,
@@ -37,7 +38,6 @@ async def _expire_jit_access() -> None:
         expired = result.scalars().all()
 
         for req in expired:
-            # Revoke the associated ServerAccess
             if req.server_access_id:
                 access_result = await db.execute(
                     select(ServerAccess).where(
@@ -54,8 +54,23 @@ async def _expire_jit_access() -> None:
                         user_id=req.user_id,
                         server_id=req.server_id,
                     )
-
             req.status = AccessRequestStatus.EXPIRED
+
+        # Also expire any direct ServerAccess grants with an expires_at
+        direct_result = await db.execute(
+            select(ServerAccess).where(
+                ServerAccess.expires_at <= now,
+                ServerAccess.revoked_at.is_(None),
+            )
+        )
+        for access in direct_result.scalars().all():
+            access.revoked_at = now
+            log.info(
+                "Time-limited server access grant expired",
+                access_id=access.id,
+                user_id=access.user_id,
+                server_id=access.server_id,
+            )
 
     if expired:
         log.info("Expired JIT access grants revoked", count=len(expired))

@@ -39,6 +39,8 @@ class UpdateUserRequest(BaseModel):
     role: UserRole | None = None
     mfa_method: MfaMethod | None = None
     password: str | None = None
+    ssh_public_key: str | None = None
+    ip_allowlist: list[str] | None = None
 
 
 class UserResponse(BaseModel):
@@ -163,6 +165,12 @@ async def update_user(
         user.mfa_method = body.mfa_method
     if body.password is not None:
         user.hashed_password = hash_password(body.password)
+    if body.ssh_public_key is not None:
+        user.ssh_public_key = body.ssh_public_key
+        user.ssh_public_key_updated_at = datetime.now(tz=UTC)
+    if body.ip_allowlist is not None:
+        import json
+        user.ip_allowlist = json.dumps(body.ip_allowlist)
 
     await db.flush()
     await audit(
