@@ -14,7 +14,8 @@ from rich.table import Table
 app = typer.Typer(
     name="bastion",
     help="Bastion SSH jumphost CLI — connect to servers, manage sessions, and issue certificates.",
-    no_args_is_help=True,
+    no_args_is_help=False,
+    invoke_without_command=True,
 )
 console = Console()
 err_console = Console(stderr=True)
@@ -65,6 +66,15 @@ def _auth_headers() -> dict[str, str]:
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
+
+
+@app.callback(invoke_without_command=True)
+def main(ctx: typer.Context) -> None:
+    """Launch the Bastion TUI when no subcommand is given."""
+    if ctx.invoked_subcommand is None:
+        from cli.tui import run_tui
+
+        run_tui()
 
 
 @app.command()

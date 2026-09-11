@@ -70,6 +70,7 @@ dependencies = [
 
     # Rate limiting
     "slowapi>=0.1.9",
+    "textual>=0.60.0",
 ]
 
 [project.scripts]

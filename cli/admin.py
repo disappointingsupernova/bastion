@@ -12,7 +12,8 @@ from rich.table import Table
 app = typer.Typer(
     name="bastion-admin",
     help="Bastion administrative CLI — user management, server onboarding, and audit queries.",
-    no_args_is_help=True,
+    no_args_is_help=False,
+    invoke_without_command=True,
 )
 user_app = typer.Typer(help="Manage Bastion users.", no_args_is_help=True)
 server_app = typer.Typer(help="Manage remote servers.", no_args_is_help=True)
