@@ -38,6 +38,7 @@ def upgrade() -> None:
         sa.Column("failed_login_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("locked_until", sa.DateTime(timezone=True), nullable=True),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("jit_access_enabled", sa.Boolean(), nullable=False, server_default="0"),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
         ),
@@ -246,9 +247,43 @@ def upgrade() -> None:
         sa.UniqueConstraint("server_id", "package_name"),
     )
 
+    op.create_table(
+        "access_requests",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("user_id", sa.String(36), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("server_id", sa.String(36), sa.ForeignKey("servers.id"), nullable=False),
+        sa.Column("reason", sa.String(1024), nullable=False),
+        sa.Column("allow_sudo", sa.Boolean(), nullable=False, server_default="0"),
+        sa.Column("requested_duration_hours", sa.Integer(), nullable=False),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("status", sa.String(32), nullable=False, server_default="pending", index=True),
+        sa.Column("reviewed_by_user_id", sa.String(36), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("review_note", sa.String(512), nullable=True),
+        sa.Column(
+            "server_access_id",
+            sa.String(36),
+            sa.ForeignKey("server_access.id"),
+            nullable=True,
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+    )
+
 
 def downgrade() -> None:
     """Drop all Bastion tables."""
+    op.drop_table("access_requests")
     op.drop_table("server_packages")
     op.drop_table("system_settings")
     op.drop_table("alert_configs")

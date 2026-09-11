@@ -80,6 +80,14 @@ class MfaMethod(StrEnum):
     EMAIL = "email"
 
 
+class AccessRequestStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    DENIED = "denied"
+    EXPIRED = "expired"
+    WITHDRAWN = "withdrawn"
+
+
 class OsFamily(StrEnum):
     DEBIAN = "debian"
     RHEL = "rhel"
@@ -127,6 +135,8 @@ class User(TimestampMixin, Base):
     failed_login_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When True, this user may submit just-in-time access requests
+    jit_access_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     certificates: Mapped[list[SshCertificate]] = relationship(back_populates="user")
     sessions: Mapped[list[Session]] = relationship(back_populates="user")
@@ -341,3 +351,37 @@ class CertSerial(Base):
     __tablename__ = "cert_serials"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+
+class AccessRequest(TimestampMixin, Base):
+    """A just-in-time request for temporary access to a server.
+
+    Users with jit_access_enabled=True on their account can submit requests.
+    Admins approve or deny. Approved access auto-revokes at expires_at.
+    """
+
+    __tablename__ = "access_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    server_id: Mapped[str] = mapped_column(String(36), ForeignKey("servers.id"), nullable=False)
+    reason: Mapped[str] = mapped_column(String(1024), nullable=False)
+    allow_sudo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    requested_duration_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[AccessRequestStatus] = mapped_column(
+        String(32), default=AccessRequestStatus.PENDING, nullable=False, index=True
+    )
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    review_note: Mapped[str | None] = mapped_column(String(512))
+    # The ServerAccess record created on approval — null until approved
+    server_access_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("server_access.id"), nullable=True
+    )
+
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
+    server: Mapped[Server] = relationship()
+    reviewer: Mapped[User | None] = relationship(foreign_keys=[reviewed_by_user_id])

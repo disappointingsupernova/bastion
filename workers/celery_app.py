@@ -30,6 +30,7 @@ app = Celery(
         "workers.tasks.packages",
         "workers.tasks.recordings",
         "workers.tasks.connectivity",
+        "workers.tasks.access_requests",
     ],
 )
 
@@ -63,6 +64,10 @@ app.conf.update(
         "dispatch-anomaly-alerts": {
             "task": "workers.tasks.alerts.dispatch_pending_anomaly_alerts",
             "schedule": crontab(minute="*/2"),
+        },
+        "expire-jit-access": {
+            "task": "workers.tasks.access_requests.expire_jit_access",
+            "schedule": crontab(minute="*/5"),
         },
     },
 )

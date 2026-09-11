@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from bastion.config import get_settings
 from bastion.logging import configure_logging, get_logger
 from bastion_admin.routers import audit, certificates, servers, users
+from bastion_admin.routers.access_requests import router as access_requests_router
 
 log = get_logger(__name__)
 
@@ -40,6 +41,7 @@ app.include_router(users.router)
 app.include_router(servers.router)
 app.include_router(certificates.router)
 app.include_router(audit.router)
+app.include_router(access_requests_router)
 
 
 @app.middleware("http")
