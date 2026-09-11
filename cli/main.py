@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 from pathlib import Path
+from typing import Optional
 
 import httpx
+import jwt as _jwt
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -20,7 +23,6 @@ app = typer.Typer(
 console = Console()
 err_console = Console(stderr=True)
 
-# Unix socket transport for all API calls
 _API_SOCKET = Path("/opt/bastion/run/bastion-api.sock")
 _ADMIN_SOCKET = Path("/opt/bastion/run/bastion-admin.sock")
 _TOKEN_FILE = Path.home() / ".bastion" / "token"
@@ -50,24 +52,41 @@ def _load_token() -> str | None:
     return None
 
 
-def _save_token(token: str, refresh_token: str | None = None) -> None:
+def _load_refresh_token() -> str | None:
+    """Load the stored refresh token from the user's home directory."""
+    if _REFRESH_TOKEN_FILE.exists():
+        return _REFRESH_TOKEN_FILE.read_text().strip()
+    return None
+
+
+def _save_token(access_token: str, refresh_token: str | None = None) -> None:
     """Save the access and optional refresh token with restricted permissions."""
     _TOKEN_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    _TOKEN_FILE.write_text(token)
+    _TOKEN_FILE.write_text(access_token)
     _TOKEN_FILE.chmod(0o600)
-    if refresh_token:
+    if refresh_token is not None:
         _REFRESH_TOKEN_FILE.write_text(refresh_token)
         _REFRESH_TOKEN_FILE.chmod(0o600)
+
+
+def _token_expires_at(token: str) -> float:
+    """Return the expiry timestamp of a JWT without verifying the signature."""
+    try:
+        payload = _jwt.decode(token, options={"verify_signature": False})
+        return float(payload.get("exp", 0))
+    except Exception:
+        return 0.0
 
 
 def _try_refresh() -> str | None:
     """Attempt a silent token refresh using the stored refresh token.
 
-    Returns the new access token on success, or None if refresh fails.
+    Returns the new access token on success, or None if the refresh token is
+    missing or the refresh request fails.
     """
-    if not _REFRESH_TOKEN_FILE.exists():
+    refresh_token = _load_refresh_token()
+    if not refresh_token:
         return None
-    refresh_token = _REFRESH_TOKEN_FILE.read_text().strip()
     try:
         with _api_client() as client:
             response = client.post("/auth/refresh", json={"refresh_token": refresh_token})
@@ -81,28 +100,52 @@ def _try_refresh() -> str | None:
 
 
 def _auth_headers() -> dict[str, str]:
-    """Return the Authorization header, silently refreshing the token if expired."""
+    """Return the Authorization header, silently refreshing the token if it is
+    expired or about to expire within the next 60 seconds.
+
+    Exits with a clear message if no valid token can be obtained.
+    """
     token = _load_token()
     if not token:
         err_console.print("[red]Not authenticated.[/red] Run [bold]bastion login[/bold] first.")
         raise typer.Exit(1)
 
-    # Attempt a proactive refresh if the token looks expired (JWT exp check)
-    try:
-        import jwt as _jwt
-        payload = _jwt.decode(token, options={"verify_signature": False})
-        import time
-        if payload.get("exp", 0) < time.time() + 60:  # Refresh if expiring within 60s
-            refreshed = _try_refresh()
-            if refreshed:
-                token = refreshed
-            else:
-                err_console.print("[red]Session expired.[/red] Run [bold]bastion login[/bold] to re-authenticate.")
-                raise typer.Exit(1)
-    except Exception:
-        pass
+    # Proactively refresh if the token expires within 60 seconds
+    if _token_expires_at(token) < time.time() + 60:
+        refreshed = _try_refresh()
+        if refreshed:
+            token = refreshed
+        else:
+            err_console.print(
+                "[red]Session expired.[/red] Run [bold]bastion login[/bold] to re-authenticate."
+            )
+            raise typer.Exit(1)
 
     return {"Authorization": f"Bearer {token}"}
+
+
+def _complete_hostnames(ctx: typer.Context, param: typer.CallbackParam, incomplete: str) -> list[str]:
+    """Shell completion callback — returns server hostnames matching the incomplete string."""
+    token = _load_token()
+    if not token:
+        return []
+    try:
+        with _api_client() as client:
+            response = client.get(
+                "/sessions/?limit=500",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=2.0,
+            )
+        if response.status_code != 200:
+            return []
+        seen: dict[str, None] = {}
+        for s in response.json():
+            h = s.get("server_hostname", "")
+            if h and h.startswith(incomplete):
+                seen[h] = None
+        return list(seen)
+    except Exception:
+        return []
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
@@ -152,13 +195,16 @@ def login(
 
 @app.command()
 def connect(
-    hostname: str = typer.Argument(..., help="Hostname of the server to connect to"),
-    identity: Path | None = typer.Option(
-        None, "--identity", "-i", help="Path to your SSH private key"
+    hostname: str = typer.Argument(
+        ...,
+        help="Hostname of the server to connect to.",
+        autocompletion=_complete_hostnames,
+    ),
+    identity: Optional[Path] = typer.Option(
+        None, "--identity", "-i", help="Path to your SSH private key."
     ),
 ) -> None:
     """Connect to a remote server via the Bastion proxy."""
-    # Resolve the SSH key to use
     key_path = identity or Path.home() / ".ssh" / "id_ed25519"
     pub_key_path = Path(str(key_path) + ".pub")
 
@@ -180,11 +226,6 @@ def connect(
             headers=_auth_headers(),
         )
 
-    if response.status_code == 401:
-        err_console.print(
-            "[red]Session expired.[/red] Run [bold]bastion login[/bold] to re-authenticate."
-        )
-        raise typer.Exit(1)
     if response.status_code != 200:
         err_console.print(
             f"[red]Connection failed:[/red] {response.json().get('detail', 'Unknown error')}"
@@ -196,23 +237,18 @@ def connect(
     remote_user = data["remote_username"]
     port = data["port"]
 
-    # Write the certificate to a temporary file and connect
     with tempfile.TemporaryDirectory(prefix="bastion-") as tmpdir:
         tmp = Path(tmpdir)
         cert_file = tmp / "id_ed25519-cert.pub"
         cert_file.write_text(cert)
         cert_file.chmod(0o600)
 
-        # Build a known_hosts file that trusts the Bastion CA for host verification.
-        # This replaces StrictHostKeyChecking=accept-new with a proper CA check (fix #15).
         known_hosts_file = tmp / "known_hosts"
         ca_pub_key_path = Path.home() / ".bastion" / "ca.pub"
         if ca_pub_key_path.exists():
             ca_pub_key = ca_pub_key_path.read_text().strip()
             known_hosts_file.write_text(f"@cert-authority * {ca_pub_key}\n")
         else:
-            # Fall back to accept-new if the CA public key has not been cached locally.
-            # Operators should distribute the CA public key to users via bastion-admin.
             err_console.print(
                 "[yellow]Warning:[/yellow] Bastion CA public key not found at "
                 f"{ca_pub_key_path}. Host verification will use accept-new. "
@@ -228,19 +264,11 @@ def connect(
             "ssh",
             [
                 "ssh",
-                "-i",
-                str(key_path),
-                "-o",
-                f"CertificateFile={cert_file}",
-                # Use the Bastion CA to verify host certificates (fix #15).
-                # StrictHostKeyChecking=yes with a CA-signed known_hosts entry
-                # prevents MITM on first connection.
-                "-o",
-                f"UserKnownHostsFile={tmp / 'known_hosts'}",
-                "-o",
-                "StrictHostKeyChecking=yes",
-                "-p",
-                str(port),
+                "-i", str(key_path),
+                "-o", f"CertificateFile={cert_file}",
+                "-o", f"UserKnownHostsFile={known_hosts_file}",
+                "-o", "StrictHostKeyChecking=yes",
+                "-p", str(port),
                 f"{remote_user}@{hostname}",
             ],
         )
@@ -248,14 +276,11 @@ def connect(
 
 @app.command()
 def sessions(
-    limit: int = typer.Option(20, help="Number of sessions to display"),
+    limit: int = typer.Option(20, help="Number of sessions to display."),
 ) -> None:
     """List your recent SSH sessions."""
     with _api_client() as client:
-        response = client.get(
-            f"/sessions/?limit={limit}",
-            headers=_auth_headers(),
-        )
+        response = client.get(f"/sessions/?limit={limit}", headers=_auth_headers())
 
     if response.status_code != 200:
         err_console.print(f"[red]Error:[/red] {response.json().get('detail', 'Unknown error')}")
@@ -299,14 +324,13 @@ def sessions(
 
 @app.command()
 def cert(
-    identity: Path | None = typer.Option(
-        None, "--identity", "-i", help="Path to your SSH public key"
+    identity: Optional[Path] = typer.Option(
+        None, "--identity", "-i", help="Path to your SSH public key."
     ),
 ) -> None:
     """Issue a new SSH certificate and display its details.
 
-    The certificate is NOT written to disk permanently (fix #14).
-    Use 'bastion connect' to establish a session — it handles the cert ephemerally.
+    The certificate is NOT written to disk. Use 'bastion connect' to connect.
     """
     pub_key_path = identity or Path.home() / ".ssh" / "id_ed25519.pub"
     if not pub_key_path.exists():
@@ -336,45 +360,6 @@ def cert(
     console.print(
         "  [dim]Certificate not written to disk. Use [bold]bastion connect[/bold] to connect.[/dim]"
     )
-
-
-@app.command()
-def servers_list() -> None:
-    """List servers available to connect to (used for shell completion)."""
-    with _api_client() as client:
-        response = client.get("/sessions/", headers=_auth_headers())
-    if response.status_code != 200:
-        return
-    seen: set[str] = set()
-    for s in response.json():
-        h = s.get("server_hostname", "")
-        if h and h not in seen:
-            console.print(h)
-            seen.add(h)
-
-
-@app.command()
-def completion(
-    shell: str = typer.Argument("bash", help="Shell type: bash, zsh, fish, or powershell"),
-) -> None:
-    """Print shell completion script. Source it to enable tab completion.
-
-    Usage:
-      bash:  source <(bastion completion bash)
-      zsh:   source <(bastion completion zsh)
-      fish:  bastion completion fish | source
-    """
-    import subprocess
-    result = subprocess.run(
-        ["bastion", f"--install-completion={shell}"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0:
-        console.print(result.stdout)
-    else:
-        # Typer's built-in completion
-        typer.echo(typer.get_completion_script(shell))
 
 
 if __name__ == "__main__":
