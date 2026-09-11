@@ -24,6 +24,7 @@ err_console = Console(stderr=True)
 _API_SOCKET = Path("/opt/bastion/run/bastion-api.sock")
 _ADMIN_SOCKET = Path("/opt/bastion/run/bastion-admin.sock")
 _TOKEN_FILE = Path.home() / ".bastion" / "token"
+_REFRESH_TOKEN_FILE = Path.home() / ".bastion" / "refresh_token"
 
 
 def _get_transport(socket_path: Path) -> httpx.HTTPTransport:
@@ -49,19 +50,58 @@ def _load_token() -> str | None:
     return None
 
 
-def _save_token(token: str) -> None:
-    """Save the access token to the user's home directory with restricted permissions."""
+def _save_token(token: str, refresh_token: str | None = None) -> None:
+    """Save the access and optional refresh token with restricted permissions."""
     _TOKEN_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     _TOKEN_FILE.write_text(token)
     _TOKEN_FILE.chmod(0o600)
+    if refresh_token:
+        _REFRESH_TOKEN_FILE.write_text(refresh_token)
+        _REFRESH_TOKEN_FILE.chmod(0o600)
+
+
+def _try_refresh() -> str | None:
+    """Attempt a silent token refresh using the stored refresh token.
+
+    Returns the new access token on success, or None if refresh fails.
+    """
+    if not _REFRESH_TOKEN_FILE.exists():
+        return None
+    refresh_token = _REFRESH_TOKEN_FILE.read_text().strip()
+    try:
+        with _api_client() as client:
+            response = client.post("/auth/refresh", json={"refresh_token": refresh_token})
+        if response.status_code == 200:
+            data = response.json()
+            _save_token(data["access_token"], data.get("refresh_token"))
+            return data["access_token"]
+    except Exception:
+        pass
+    return None
 
 
 def _auth_headers() -> dict[str, str]:
-    """Return the Authorization header for authenticated requests."""
+    """Return the Authorization header, silently refreshing the token if expired."""
     token = _load_token()
     if not token:
         err_console.print("[red]Not authenticated.[/red] Run [bold]bastion login[/bold] first.")
         raise typer.Exit(1)
+
+    # Attempt a proactive refresh if the token looks expired (JWT exp check)
+    try:
+        import jwt as _jwt
+        payload = _jwt.decode(token, options={"verify_signature": False})
+        import time
+        if payload.get("exp", 0) < time.time() + 60:  # Refresh if expiring within 60s
+            refreshed = _try_refresh()
+            if refreshed:
+                token = refreshed
+            else:
+                err_console.print("[red]Session expired.[/red] Run [bold]bastion login[/bold] to re-authenticate.")
+                raise typer.Exit(1)
+    except Exception:
+        pass
+
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -106,7 +146,7 @@ def login(
             raise typer.Exit(1)
         data = response.json()
 
-    _save_token(data["access_token"])
+    _save_token(data["access_token"], data.get("refresh_token"))
     console.print("[green]✓[/green] Authenticated successfully.")
 
 
@@ -296,6 +336,45 @@ def cert(
     console.print(
         "  [dim]Certificate not written to disk. Use [bold]bastion connect[/bold] to connect.[/dim]"
     )
+
+
+@app.command()
+def servers_list() -> None:
+    """List servers available to connect to (used for shell completion)."""
+    with _api_client() as client:
+        response = client.get("/sessions/", headers=_auth_headers())
+    if response.status_code != 200:
+        return
+    seen: set[str] = set()
+    for s in response.json():
+        h = s.get("server_hostname", "")
+        if h and h not in seen:
+            console.print(h)
+            seen.add(h)
+
+
+@app.command()
+def completion(
+    shell: str = typer.Argument("bash", help="Shell type: bash, zsh, fish, or powershell"),
+) -> None:
+    """Print shell completion script. Source it to enable tab completion.
+
+    Usage:
+      bash:  source <(bastion completion bash)
+      zsh:   source <(bastion completion zsh)
+      fish:  bastion completion fish | source
+    """
+    import subprocess
+    result = subprocess.run(
+        ["bastion", f"--install-completion={shell}"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        console.print(result.stdout)
+    else:
+        # Typer's built-in completion
+        typer.echo(typer.get_completion_script(shell))
 
 
 if __name__ == "__main__":

@@ -55,6 +55,23 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
+
+@app.middleware("http")
+async def rate_limit_headers_middleware(request: Request, call_next):
+    """Inject X-RateLimit-* headers into every response.
+
+    Reads the limit state set by slowapi and exposes it so CLI tools and
+    integrations can back off gracefully rather than hitting 429s unexpectedly.
+    """
+    response = await call_next(request)
+    # slowapi stores limit info in request.state after processing
+    limit_info = getattr(request.state, "view_rate_limit", None)
+    if limit_info:
+        response.headers["X-RateLimit-Limit"] = str(limit_info.limit.amount)
+        response.headers["X-RateLimit-Remaining"] = str(max(0, limit_info.limit.amount - limit_info.current_count))
+        response.headers["X-RateLimit-Reset"] = str(int(limit_info.reset_time))
+    return response
+
 # CORS is intentionally restrictive — this API is Unix-socket only
 app.add_middleware(
     CORSMiddleware,
