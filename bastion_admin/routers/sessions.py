@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
-from typing import Annotated, AsyncGenerator
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -280,7 +281,11 @@ async def playback_recording_derived_key(
     from pathlib import Path
 
     from bastion.config import get_settings
-    from bastion.recordings import admin_key_fingerprint, decrypt_recording, derive_admin_decrypt_key
+    from bastion.recordings import (
+        admin_key_fingerprint,
+        decrypt_recording,
+        derive_admin_decrypt_key,
+    )
 
     settings = get_settings()
     if not settings.recordings_master_key:
@@ -309,6 +314,7 @@ async def playback_recording_derived_key(
 
     # Convert raw bytes to an age identity format (X25519 secret key)
     import base64
+
     age_identity = f"AGE-SECRET-KEY-1{base64.b32encode(derived_key).decode().upper().rstrip('=')}"
 
     try:

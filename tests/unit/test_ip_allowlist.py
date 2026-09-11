@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from bastion.ip_allowlist import check_ip_allowed
 
 

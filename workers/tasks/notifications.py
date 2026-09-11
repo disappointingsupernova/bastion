@@ -49,7 +49,7 @@ async def _check_ssh_key_age() -> None:
         stale_users = result.scalars().all()
 
         for user in stale_users:
-            days_old = (datetime.now(tz=UTC) - user.ssh_public_key_updated_at).days
+            days_old = (datetime.now(tz=UTC) - user.ssh_public_key_updated_at).days  # type: ignore[operator]
             await dispatch_alert(
                 db,
                 subject=f"SSH public key rotation required — {user.username}",
@@ -118,7 +118,9 @@ async def _notify_cert_expiry() -> None:
                 ),
                 severity=AlertSeverity.WARNING,
             )
-            log.info("Certificate expiry notification sent", cert_id=cert.id, minutes_left=minutes_left)
+            log.info(
+                "Certificate expiry notification sent", cert_id=cert.id, minutes_left=minutes_left
+            )
 
 
 # ── Automatic KRL distribution ────────────────────────────────────────────────
@@ -176,10 +178,14 @@ async def _distribute_krl() -> None:
                 )
                 # Verify the KRL was written correctly
                 result_check = await conn.run(
-                    f"wc -c < /etc/ssh/bastion_krl",
+                    "wc -c < /etc/ssh/bastion_krl",
                     check=True,
                 )
-                remote_size = int(result_check.stdout.strip())
+                stdout_raw = result_check.stdout
+                stdout_text = (
+                    stdout_raw.decode() if isinstance(stdout_raw, bytes) else (stdout_raw or "")
+                )
+                remote_size = int(stdout_text.strip())
                 if remote_size != len(krl_bytes):
                     raise RuntimeError(
                         f"KRL size mismatch: expected {len(krl_bytes)}, got {remote_size}"
@@ -197,7 +203,9 @@ async def _distribute_krl() -> None:
         failed=failure_count,
     )
     if failure_count > 0:
-        log.warning("KRL distribution had failures — some servers may have stale KRL", failed=failure_count)
+        log.warning(
+            "KRL distribution had failures — some servers may have stale KRL", failed=failure_count
+        )
 
 
 # ── Database backup ───────────────────────────────────────────────────────────
@@ -245,15 +253,18 @@ async def _backup_database() -> None:
                 timeout=300,
             )
             if result.returncode != 0:
-                raise RuntimeError(f"pg_dump failed: {result.stderr.decode()}")
+                stderr_out = result.stderr
+                msg = stderr_out.decode() if isinstance(stderr_out, bytes) else (stderr_out or "")
+                raise RuntimeError(f"pg_dump failed: {msg}")
 
         if settings.recordings_storage == StorageBackend.S3 and settings.recordings_s3_bucket:
             import boto3
+
             s3_key = f"bastion/backups/{backup_file.name}"
-            boto3.client("s3").upload_file(
-                str(backup_file), settings.recordings_s3_bucket, s3_key
+            boto3.client("s3").upload_file(str(backup_file), settings.recordings_s3_bucket, s3_key)
+            log.info(
+                "Database backup uploaded to S3", key=s3_key, bucket=settings.recordings_s3_bucket
             )
-            log.info("Database backup uploaded to S3", key=s3_key, bucket=settings.recordings_s3_bucket)
         else:
             backup_dir = settings.bastion_root / "data" / "backups"
             backup_dir.mkdir(exist_ok=True)
@@ -314,13 +325,16 @@ async def _node_heartbeat() -> None:
 
     try:
         import importlib.metadata
+
         version = importlib.metadata.version("bastion")
     except Exception:
         version = "unknown"
 
-    load_metrics = json.dumps({
-        "load_avg": os.getloadavg() if hasattr(os, "getloadavg") else None,
-    })
+    load_metrics = json.dumps(
+        {
+            "load_avg": os.getloadavg() if hasattr(os, "getloadavg") else None,
+        }
+    )
 
     async with get_db_session() as db:
         result = await db.execute(

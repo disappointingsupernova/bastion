@@ -196,7 +196,15 @@ class TestEnumerations:
 
     def test_alert_channels(self):
         """AlertChannel must contain all expected values including webhook and syslog."""
-        assert set(AlertChannel) == {"email", "ses", "slack", "pagerduty", "pushover", "webhook", "syslog"}
+        assert set(AlertChannel) == {
+            "email",
+            "ses",
+            "slack",
+            "pagerduty",
+            "pushover",
+            "webhook",
+            "syslog",
+        }
 
     def test_alert_severities(self):
         """AlertSeverity must contain all expected values."""

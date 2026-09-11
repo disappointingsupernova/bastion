@@ -41,18 +41,14 @@ def _check_session_policy(policy_json: str | None, command: str | None) -> None:
     if command:
         # Block scp/sftp
         if policy.get("block_scp") and (
-            command.startswith("scp ") or command.startswith("sftp-server")
-            or "sftp" in command
+            command.startswith("scp ") or command.startswith("sftp-server") or "sftp" in command
         ):
             raise PermissionError("scp/sftp is not permitted on this server.")
 
         # Restrict to allowed commands
         allowed = policy.get("allowed_commands")
         if allowed is not None and command not in allowed:
-            raise PermissionError(
-                f"Command not permitted by server policy. Allowed: {allowed}"
-            )
-
+            raise PermissionError(f"Command not permitted by server policy. Allowed: {allowed}")
 
 
 def _make_known_hosts(ca_pub_key_path: Path) -> asyncssh.SSHKnownHosts:
@@ -151,7 +147,9 @@ class BastionSSHSession(asyncssh.SSHServerSession):
     def subsystem_requested(self, subsystem: str) -> bool:
         """Block sftp subsystem if session policy requires it."""
         try:
-            _check_session_policy(self._session_policy, f"sftp-server" if subsystem == "sftp" else subsystem)
+            _check_session_policy(
+                self._session_policy, "sftp-server" if subsystem == "sftp" else subsystem
+            )
         except PermissionError as exc:
             log.warning(
                 "Subsystem request blocked by session policy",
@@ -240,8 +238,11 @@ class BastionSSHSession(asyncssh.SSHServerSession):
                 self._chan.write(data)
                 # Publish to live monitoring channel
                 from bastion.recordings import publish_live_output
+
                 asyncio.create_task(
-                    publish_live_output(self._session_record.id, data.decode("utf-8", errors="replace"))
+                    publish_live_output(
+                        self._session_record.id, data.decode("utf-8", errors="replace")
+                    )
                 )
         except Exception as exc:
             log.debug(
@@ -253,6 +254,7 @@ class BastionSSHSession(asyncssh.SSHServerSession):
             self._chan.exit(exit_status)
             # Signal live monitoring subscribers that the session has ended
             from bastion.recordings import publish_live_output
+
             asyncio.create_task(publish_live_output(self._session_record.id, "__END__"))
             await self._finalise()
 

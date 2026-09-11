@@ -22,7 +22,6 @@ from bastion.models import (
     Session,
     SshCertificate,
     User,
-    UserStatus,
 )
 
 log = get_logger(__name__)
@@ -54,9 +53,7 @@ async def generate_access_matrix(db: AsyncSession) -> list[dict]:
     ]
 
 
-async def generate_sessions_report(
-    db: AsyncSession, days: int = 30
-) -> list[dict]:
+async def generate_sessions_report(db: AsyncSession, days: int = 30) -> list[dict]:
     """Return session counts per server per period."""
     since = datetime.now(tz=UTC) - timedelta(days=days)
     result = await db.execute(
@@ -80,15 +77,18 @@ async def generate_sessions_report(
     ]
 
 
-async def generate_cert_history(
-    db: AsyncSession, days: int = 30
-) -> list[dict]:
+async def generate_cert_history(db: AsyncSession, days: int = 30) -> list[dict]:
     """Return certificate issuance history for the period."""
     since = datetime.now(tz=UTC) - timedelta(days=days)
     result = await db.execute(
-        select(User.username, SshCertificate.serial, SshCertificate.status,
-               SshCertificate.valid_after, SshCertificate.valid_before,
-               SshCertificate.issued_from_ip)
+        select(
+            User.username,
+            SshCertificate.serial,
+            SshCertificate.status,
+            SshCertificate.valid_after,
+            SshCertificate.valid_before,
+            SshCertificate.issued_from_ip,
+        )
         .join(User, User.id == SshCertificate.user_id)
         .where(SshCertificate.created_at >= since)
         .order_by(SshCertificate.created_at.desc())
@@ -106,9 +106,7 @@ async def generate_cert_history(
     ]
 
 
-async def generate_failed_auth_summary(
-    db: AsyncSession, days: int = 30
-) -> list[dict]:
+async def generate_failed_auth_summary(db: AsyncSession, days: int = 30) -> list[dict]:
     """Return failed authentication summary grouped by username."""
     since = datetime.now(tz=UTC) - timedelta(days=days)
     result = await db.execute(
@@ -162,13 +160,17 @@ def _rows_to_pdf(title: str, rows: list[dict]) -> bytes:
     headers = list(rows[0].keys())
     data = [headers] + [[str(r.get(h, "")) for h in headers] for r in rows]
     table = Table(data, repeatRows=1)
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-    ]))
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
+            ]
+        )
+    )
     doc.build([table])
     return buf.getvalue()
 
@@ -199,11 +201,9 @@ async def build_report(
     if fmt == "pdf":
         content = _rows_to_pdf(report_type.replace("_", " ").title(), rows)
         filename = f"bastion_{report_type}_{ts}.pdf"
-        mime = "application/pdf"
     else:
         content = _rows_to_csv(rows)
         filename = f"bastion_{report_type}_{ts}.csv"
-        mime = "text/csv"
 
     log.info("Compliance report generated", report_type=report_type, fmt=fmt, rows=len(rows))
     return content, filename
@@ -236,13 +236,16 @@ async def email_report(
     msg["Subject"] = f"[Bastion] Compliance report: {report_type} ({fmt.upper()})"
     msg["From"] = settings.smtp_from_address or settings.ses_from_address or "bastion@localhost"
     msg["To"] = recipient
-    msg.attach(email.mime.text.MIMEText(
-        f"Please find the {report_type} compliance report attached.\n\nGenerated: {datetime.now(tz=UTC).isoformat()}"
-    ))
+    msg.attach(
+        email.mime.text.MIMEText(
+            f"Please find the {report_type} compliance report attached.\n\nGenerated: {datetime.now(tz=UTC).isoformat()}"
+        )
+    )
 
     attachment = email.mime.base.MIMEBase(*mime.split("/"))
     attachment.set_payload(content)
     import email.encoders
+
     email.encoders.encode_base64(attachment)
     attachment.add_header("Content-Disposition", "attachment", filename=filename)
     msg.attach(attachment)

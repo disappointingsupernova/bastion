@@ -8,7 +8,6 @@ baselines where available, falling back to fixed thresholds.
 from __future__ import annotations
 
 import json
-import math
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
@@ -69,9 +68,7 @@ SCORE_MULTIPLE_FAILED_SERVERS = 40
 
 async def _get_baseline(db: AsyncSession, user_id: str) -> AnomalyBaseline | None:
     """Fetch the anomaly baseline for a user, or None if not yet established."""
-    result = await db.execute(
-        select(AnomalyBaseline).where(AnomalyBaseline.user_id == user_id)
-    )
+    result = await db.execute(select(AnomalyBaseline).where(AnomalyBaseline.user_id == user_id))
     return result.scalar_one_or_none()
 
 
@@ -124,11 +121,11 @@ async def update_baseline(db: AsyncSession, user_id: str, session: Session | Non
             baseline.avg_session_duration_seconds = duration
             baseline.avg_session_bytes = total_bytes
         else:
-            baseline.avg_session_duration_seconds = (
-                alpha * duration + (1 - alpha) * (baseline.avg_session_duration_seconds or duration)
+            baseline.avg_session_duration_seconds = alpha * duration + (1 - alpha) * (
+                baseline.avg_session_duration_seconds or duration
             )
-            baseline.avg_session_bytes = (
-                alpha * total_bytes + (1 - alpha) * (baseline.avg_session_bytes or total_bytes)
+            baseline.avg_session_bytes = alpha * total_bytes + (1 - alpha) * (
+                baseline.avg_session_bytes or total_bytes
             )
         baseline.sample_count = n + 1
 
@@ -178,11 +175,13 @@ async def evaluate_login(
         )
         failed_count = result.scalar_one()
         if failed_count >= 5:
-            events.append((
-                SCORE_FAILED_AUTH_BURST,
-                ET_FAILED_AUTH_BURST,
-                [f"Failed login burst: {failed_count} attempts in 10 minutes"],
-            ))
+            events.append(
+                (
+                    SCORE_FAILED_AUTH_BURST,
+                    ET_FAILED_AUTH_BURST,
+                    [f"Failed login burst: {failed_count} attempts in 10 minutes"],
+                )
+            )
 
         # Multiple failed server attempts
         server_result = await db.execute(
@@ -194,11 +193,13 @@ async def evaluate_login(
         )
         denied_count = server_result.scalar_one()
         if denied_count >= 3:
-            events.append((
-                SCORE_MULTIPLE_FAILED_SERVERS,
-                ET_MULTIPLE_FAILED_SERVERS,
-                [f"Attempted {denied_count} denied server connections in 10 minutes"],
-            ))
+            events.append(
+                (
+                    SCORE_MULTIPLE_FAILED_SERVERS,
+                    ET_MULTIPLE_FAILED_SERVERS,
+                    [f"Attempted {denied_count} denied server connections in 10 minutes"],
+                )
+            )
 
     if success:
         hour = now.hour
@@ -208,35 +209,43 @@ async def evaluate_login(
         if baseline and baseline.typical_hours:
             typical = json.loads(baseline.typical_hours)
             if typical and hour not in typical:
-                events.append((
+                events.append(
+                    (
+                        SCORE_OFF_HOURS_LOGIN,
+                        ET_OFF_HOURS,
+                        [f"Login at hour {hour:02d}:xx UTC — outside typical hours {typical}"],
+                    )
+                )
+        elif hour >= 22 or hour < 6:
+            events.append(
+                (
                     SCORE_OFF_HOURS_LOGIN,
                     ET_OFF_HOURS,
-                    [f"Login at hour {hour:02d}:xx UTC — outside typical hours {typical}"],
-                ))
-        elif hour >= 22 or hour < 6:
-            events.append((
-                SCORE_OFF_HOURS_LOGIN,
-                ET_OFF_HOURS,
-                [f"Login outside business hours (UTC {hour:02d}:xx)"],
-            ))
+                    [f"Login outside business hours (UTC {hour:02d}:xx)"],
+                )
+            )
 
         # Weekend access
         if weekday >= 5:
-            events.append((
-                SCORE_WEEKEND_ACCESS,
-                ET_WEEKEND_ACCESS,
-                [f"Login on {'Saturday' if weekday == 5 else 'Sunday'}"],
-            ))
+            events.append(
+                (
+                    SCORE_WEEKEND_ACCESS,
+                    ET_WEEKEND_ACCESS,
+                    [f"Login on {'Saturday' if weekday == 5 else 'Sunday'}"],
+                )
+            )
 
         # New source IP — baseline-aware
         if baseline and baseline.known_ips:
             known = json.loads(baseline.known_ips)
             if source_ip not in known:
-                events.append((
-                    SCORE_NEW_SOURCE_IP,
-                    ET_NEW_IP,
-                    [f"First login from IP {source_ip} (not in 30-day baseline)"],
-                ))
+                events.append(
+                    (
+                        SCORE_NEW_SOURCE_IP,
+                        ET_NEW_IP,
+                        [f"First login from IP {source_ip} (not in 30-day baseline)"],
+                    )
+                )
         else:
             result = await db.execute(
                 select(func.count(AuditLog.id)).where(
@@ -247,11 +256,13 @@ async def evaluate_login(
                 )
             )
             if result.scalar_one() == 0:
-                events.append((
-                    SCORE_NEW_SOURCE_IP,
-                    ET_NEW_IP,
-                    [f"First login from IP {source_ip}"],
-                ))
+                events.append(
+                    (
+                        SCORE_NEW_SOURCE_IP,
+                        ET_NEW_IP,
+                        [f"First login from IP {source_ip}"],
+                    )
+                )
 
         # First login ever
         result = await db.execute(
@@ -262,21 +273,25 @@ async def evaluate_login(
             )
         )
         if result.scalar_one() == 1:  # This is the first successful login
-            events.append((
-                SCORE_FIRST_LOGIN,
-                ET_FIRST_LOGIN,
-                ["First ever successful login for this account"],
-            ))
+            events.append(
+                (
+                    SCORE_FIRST_LOGIN,
+                    ET_FIRST_LOGIN,
+                    ["First ever successful login for this account"],
+                )
+            )
 
         # Dormant account (no login in 90 days)
         if user.last_login_at:
             days_since = (now - user.last_login_at).days
             if days_since > 90:
-                events.append((
-                    SCORE_DORMANT_ACCOUNT,
-                    ET_ACCOUNT_DORMANT,
-                    [f"Account dormant for {days_since} days before this login"],
-                ))
+                events.append(
+                    (
+                        SCORE_DORMANT_ACCOUNT,
+                        ET_ACCOUNT_DORMANT,
+                        [f"Account dormant for {days_since} days before this login"],
+                    )
+                )
 
         # Concurrent sessions
         result = await db.execute(
@@ -287,11 +302,13 @@ async def evaluate_login(
         )
         active_sessions = result.scalar_one()
         if active_sessions > 3:
-            events.append((
-                SCORE_CONCURRENT_SESSIONS,
-                ET_CONCURRENT_SESSIONS,
-                [f"User has {active_sessions} concurrent active sessions"],
-            ))
+            events.append(
+                (
+                    SCORE_CONCURRENT_SESSIONS,
+                    ET_CONCURRENT_SESSIONS,
+                    [f"User has {active_sessions} concurrent active sessions"],
+                )
+            )
 
         # Update baseline after successful login
         await update_baseline(db, user.id)
@@ -331,7 +348,9 @@ async def evaluate_session(
 
     # High data transfer — baseline-aware
     if baseline and baseline.avg_session_bytes and baseline.avg_session_bytes > 0:
-        byte_score = _deviation_score(float(total_bytes), baseline.avg_session_bytes, SCORE_HIGH_DATA_TRANSFER)
+        byte_score = _deviation_score(
+            float(total_bytes), baseline.avg_session_bytes, SCORE_HIGH_DATA_TRANSFER
+        )
         if byte_score > 0:
             mb = total_bytes / (1024 * 1024)
             avg_mb = baseline.avg_session_bytes / (1024 * 1024)
@@ -339,23 +358,29 @@ async def evaluate_session(
             factors.append(f"Data transfer {mb:.1f} MB vs baseline {avg_mb:.1f} MB")
     elif total_bytes > 500 * 1024 * 1024:
         score += SCORE_HIGH_DATA_TRANSFER
-        factors.append(f"High data transfer: {total_bytes / (1024*1024):.1f} MB")
+        factors.append(f"High data transfer: {total_bytes / (1024 * 1024):.1f} MB")
 
     # Long session — baseline-aware
     if session.ended_at and session.started_at:
         duration = (session.ended_at - session.started_at).total_seconds()
-        if baseline and baseline.avg_session_duration_seconds and baseline.avg_session_duration_seconds > 0:
-            dur_score = _deviation_score(duration, baseline.avg_session_duration_seconds, SCORE_LONG_SESSION)
+        if (
+            baseline
+            and baseline.avg_session_duration_seconds
+            and baseline.avg_session_duration_seconds > 0
+        ):
+            dur_score = _deviation_score(
+                duration, baseline.avg_session_duration_seconds, SCORE_LONG_SESSION
+            )
             if dur_score > 0:
                 score += dur_score
                 event_type = ET_LONG_SESSION
                 factors.append(
-                    f"Session duration {duration/60:.0f}m vs baseline {baseline.avg_session_duration_seconds/60:.0f}m"
+                    f"Session duration {duration / 60:.0f}m vs baseline {baseline.avg_session_duration_seconds / 60:.0f}m"
                 )
         elif duration > 8 * 3600:  # 8 hours
             score += SCORE_LONG_SESSION
             event_type = ET_LONG_SESSION
-            factors.append(f"Session duration {duration/3600:.1f}h exceeds 8h threshold")
+            factors.append(f"Session duration {duration / 3600:.1f}h exceeds 8h threshold")
 
     # Session outside typical hours
     if session.started_at and baseline and baseline.typical_hours:
@@ -363,7 +388,9 @@ async def evaluate_session(
         if typical and session.started_at.hour not in typical:
             score += SCORE_SESSION_OUTSIDE_HOURS
             event_type = ET_SESSION_OUTSIDE_HOURS
-            factors.append(f"Session started at hour {session.started_at.hour:02d}:xx UTC — outside baseline")
+            factors.append(
+                f"Session started at hour {session.started_at.hour:02d}:xx UTC — outside baseline"
+            )
 
     # Update baseline with this session's stats
     await update_baseline(db, session.user_id, session=session)

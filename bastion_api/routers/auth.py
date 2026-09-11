@@ -137,9 +137,7 @@ async def login(
             detail={"reason": "IP not in allowlist"},
         )
         # Return the same error as invalid credentials to avoid user enumeration
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials."
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
     # ── Account lockout check ─────────────────────────────────────────────────
     if user and user.locked_until and user.locked_until > datetime.now(tz=UTC):
@@ -484,18 +482,16 @@ async def fido2_authenticate_begin(
     )
     user = result.scalar_one_or_none()
     if user is None or not verify_password(body.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials."
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
     if not check_ip_allowed(ip, user.ip_allowlist):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials."
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
     settings = get_settings()
     options, state_token = await begin_authentication(db, user, settings.secret_key)
-    return Fido2AuthBeginResponse(options={"challenge_options": options, "state_token": state_token})
+    return Fido2AuthBeginResponse(
+        options={"challenge_options": options, "state_token": state_token}
+    )
 
 
 @router.post("/fido2/authenticate/complete", response_model=TokenResponse)

@@ -29,14 +29,10 @@ class TestCreateGroup:
         """Creating a group with a duplicate name must return 409."""
         headers = {"Authorization": f"Bearer {admin_token}"}
         await admin_client.post("/groups/", json={"name": "dup-team"}, headers=headers)
-        response = await admin_client.post(
-            "/groups/", json={"name": "dup-team"}, headers=headers
-        )
+        response = await admin_client.post("/groups/", json={"name": "dup-team"}, headers=headers)
         assert response.status_code == 409
 
-    async def test_non_admin_cannot_create_group(
-        self, admin_client: AsyncClient, user_token: str
-    ):
+    async def test_non_admin_cannot_create_group(self, admin_client: AsyncClient, user_token: str):
         """A non-admin user must receive 403 when creating a group."""
         response = await admin_client.post(
             "/groups/",
@@ -55,9 +51,7 @@ class TestCreateGroup:
 class TestListGroups:
     """Tests for GET /groups/."""
 
-    async def test_empty_list_returned_initially(
-        self, admin_client: AsyncClient, admin_token: str
-    ):
+    async def test_empty_list_returned_initially(self, admin_client: AsyncClient, admin_token: str):
         """With no groups, the list must be empty."""
         response = await admin_client.get(
             "/groups/", headers={"Authorization": f"Bearer {admin_token}"}
@@ -65,9 +59,7 @@ class TestListGroups:
         assert response.status_code == 200
         assert response.json() == []
 
-    async def test_created_group_appears_in_list(
-        self, admin_client: AsyncClient, admin_token: str
-    ):
+    async def test_created_group_appears_in_list(self, admin_client: AsyncClient, admin_token: str):
         """A created group must appear in the list."""
         headers = {"Authorization": f"Bearer {admin_token}"}
         await admin_client.post("/groups/", json={"name": "list-team"}, headers=headers)
@@ -76,9 +68,7 @@ class TestListGroups:
         names = [g["name"] for g in response.json()]
         assert "list-team" in names
 
-    async def test_auditor_can_list_groups(
-        self, admin_client: AsyncClient, auditor_token: str
-    ):
+    async def test_auditor_can_list_groups(self, admin_client: AsyncClient, auditor_token: str):
         """An auditor must be able to list groups."""
         response = await admin_client.get(
             "/groups/", headers={"Authorization": f"Bearer {auditor_token}"}
@@ -153,9 +143,7 @@ class TestGroupMembership:
         )
         group_id = group_resp.json()["id"]
 
-        await admin_client.post(
-            f"/groups/{group_id}/members/{regular_user.id}", headers=headers
-        )
+        await admin_client.post(f"/groups/{group_id}/members/{regular_user.id}", headers=headers)
         response = await admin_client.post(
             f"/groups/{group_id}/members/{regular_user.id}", headers=headers
         )
@@ -174,9 +162,7 @@ class TestGroupMembership:
         )
         group_id = group_resp.json()["id"]
 
-        await admin_client.post(
-            f"/groups/{group_id}/members/{regular_user.id}", headers=headers
-        )
+        await admin_client.post(f"/groups/{group_id}/members/{regular_user.id}", headers=headers)
         response = await admin_client.delete(
             f"/groups/{group_id}/members/{regular_user.id}", headers=headers
         )
@@ -253,9 +239,7 @@ class TestGroupServerAccess:
         )
 
         # Now add the user — they should be auto-provisioned
-        await admin_client.post(
-            f"/groups/{group_id}/members/{regular_user.id}", headers=headers
-        )
+        await admin_client.post(f"/groups/{group_id}/members/{regular_user.id}", headers=headers)
 
         result = await db_session.execute(
             select(ServerAccess).where(

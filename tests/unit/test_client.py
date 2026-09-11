@@ -122,29 +122,33 @@ class TestMakeHttpClient:
         """make_http_client must return an httpx.Client instance."""
         # We can't actually connect to a socket in tests, so just verify the type
         # by checking the class without opening the connection
-        client = make_http_client.__wrapped__ if hasattr(make_http_client, "__wrapped__") else None
+        make_http_client.__wrapped__ if hasattr(make_http_client, "__wrapped__") else None
         # Just verify the function is callable and returns the right type annotation
         import inspect
+
         sig = inspect.signature(make_http_client)
         assert "token" in sig.parameters
         assert "socket_path" in sig.parameters
 
     def test_auth_header_set(self):
         """The client must include the Bearer token in the Authorization header."""
-        # Patch HTTPTransport to avoid needing a real socket
-        with patch("bastion.client.httpx.HTTPTransport"):
-            with patch("bastion.client.httpx.Client") as mock_client_cls:
-                make_http_client("my-token", "/fake/socket.sock")
-                call_kwargs = mock_client_cls.call_args[1]
-                assert call_kwargs["headers"]["Authorization"] == "Bearer my-token"
+        with (
+            patch("bastion.client.httpx.HTTPTransport"),
+            patch("bastion.client.httpx.Client") as mock_client_cls,
+        ):
+            make_http_client("my-token", "/fake/socket.sock")
+            call_kwargs = mock_client_cls.call_args[1]
+            assert call_kwargs["headers"]["Authorization"] == "Bearer my-token"
 
     def test_timeout_set(self):
         """The client must have a 30-second timeout."""
-        with patch("bastion.client.httpx.HTTPTransport"):
-            with patch("bastion.client.httpx.Client") as mock_client_cls:
-                make_http_client("token", "/fake/socket.sock")
-                call_kwargs = mock_client_cls.call_args[1]
-                assert call_kwargs["timeout"] == 30.0
+        with (
+            patch("bastion.client.httpx.HTTPTransport"),
+            patch("bastion.client.httpx.Client") as mock_client_cls,
+        ):
+            make_http_client("token", "/fake/socket.sock")
+            call_kwargs = mock_client_cls.call_args[1]
+            assert call_kwargs["timeout"] == 30.0
 
 
 class TestBastionClientMethods:

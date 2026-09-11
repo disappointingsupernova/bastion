@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from bastion.recordings import (
     admin_key_fingerprint,
     derive_admin_decrypt_key,

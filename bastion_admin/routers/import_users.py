@@ -76,17 +76,20 @@ async def import_users_csv(
             skipped += 1
             continue
 
-        existing = (await db.execute(
-            select(User).where(
-                (User.username == username) | (User.email == email),
-                User.deleted_at.is_(None),
+        existing = (
+            await db.execute(
+                select(User).where(
+                    (User.username == username) | (User.email == email),
+                    User.deleted_at.is_(None),
+                )
             )
-        )).scalar_one_or_none()
+        ).scalar_one_or_none()
         if existing:
             skipped += 1
             continue
 
         import secrets
+
         password = row.get("password") or secrets.token_urlsafe(16)
         role_str = (row.get("role") or "user").strip().lower()
         try:
@@ -162,7 +165,11 @@ async def ldap_sync(
         conn.search(
             settings.ldap_user_base_dn,
             settings.ldap_user_filter,
-            attributes=[settings.ldap_username_attr, settings.ldap_email_attr, "userAccountControl"],
+            attributes=[
+                settings.ldap_username_attr,
+                settings.ldap_email_attr,
+                "userAccountControl",
+            ],
         )
         ldap_entries = conn.entries
     except Exception as exc:
@@ -188,9 +195,11 @@ async def ldap_sync(
         if username in settings.excluded_system_users:
             continue
 
-        existing = (await db.execute(
-            select(User).where(User.username == username, User.deleted_at.is_(None))
-        )).scalar_one_or_none()
+        existing = (
+            await db.execute(
+                select(User).where(User.username == username, User.deleted_at.is_(None))
+            )
+        ).scalar_one_or_none()
 
         if existing:
             if is_disabled and existing.status == UserStatus.ACTIVE:
@@ -199,6 +208,7 @@ async def ldap_sync(
         else:
             if not is_disabled:
                 import secrets
+
                 user = User(
                     username=username,
                     email=email,
@@ -217,7 +227,10 @@ async def ldap_sync(
         select(User).where(User.status == UserStatus.ACTIVE, User.deleted_at.is_(None))
     )
     for user in all_users_result.scalars().all():
-        if user.username not in ldap_usernames and user.username not in settings.excluded_system_users:
+        if (
+            user.username not in ldap_usernames
+            and user.username not in settings.excluded_system_users
+        ):
             user.status = UserStatus.SUSPENDED
             suspended += 1
             log.info("User suspended — not found in LDAP", username=user.username)

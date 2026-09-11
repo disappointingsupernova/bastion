@@ -10,9 +10,7 @@ from httpx import AsyncClient
 class TestAuditLogList:
     """Tests for GET /audit/."""
 
-    async def test_admin_can_list_audit_logs(
-        self, admin_client: AsyncClient, admin_token: str
-    ):
+    async def test_admin_can_list_audit_logs(self, admin_client: AsyncClient, admin_token: str):
         """An admin must be able to list audit logs."""
         response = await admin_client.get(
             "/audit/", headers={"Authorization": f"Bearer {admin_token}"}
@@ -20,9 +18,7 @@ class TestAuditLogList:
         assert response.status_code == 200
         assert isinstance(response.json(), list)
 
-    async def test_auditor_can_list_audit_logs(
-        self, admin_client: AsyncClient, auditor_token: str
-    ):
+    async def test_auditor_can_list_audit_logs(self, admin_client: AsyncClient, auditor_token: str):
         """An auditor must be able to list audit logs."""
         response = await admin_client.get(
             "/audit/", headers={"Authorization": f"Bearer {auditor_token}"}
@@ -129,9 +125,7 @@ class TestAuditLogList:
 class TestAuditChainVerification:
     """Tests for GET /audit/verify-chain."""
 
-    async def test_empty_chain_is_valid(
-        self, admin_client: AsyncClient, admin_token: str
-    ):
+    async def test_empty_chain_is_valid(self, admin_client: AsyncClient, admin_token: str):
         """An empty audit log must report as valid."""
         response = await admin_client.get(
             "/audit/verify-chain",
@@ -172,10 +166,8 @@ class TestAuditChainVerification:
         db_session,
     ):
         """A tampered entry must cause the chain verification to fail."""
-        from sqlalchemy import select
 
         from bastion.audit import audit
-        from bastion.models import AuditLog
 
         await audit(db_session, "action.one", success=True)
         e2 = await audit(db_session, "action.two", success=True)
@@ -194,9 +186,7 @@ class TestAuditChainVerification:
         assert data["valid"] is False
         assert data["first_broken_entry_id"] == e2.id
 
-    async def test_auditor_can_verify_chain(
-        self, admin_client: AsyncClient, auditor_token: str
-    ):
+    async def test_auditor_can_verify_chain(self, admin_client: AsyncClient, auditor_token: str):
         """An auditor must be able to verify the audit chain."""
         response = await admin_client.get(
             "/audit/verify-chain",

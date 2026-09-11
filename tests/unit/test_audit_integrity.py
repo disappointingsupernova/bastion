@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
-from sqlalchemy import select
 
 from bastion.audit import (
     _compute_integrity_hash,
@@ -57,17 +54,17 @@ class TestComputeIntegrityHash:
     """Tests for _compute_integrity_hash."""
 
     def _make_entry(self, **kwargs) -> AuditLog:
-        defaults = dict(
-            id="test-id-1",
-            action="test.action",
-            user_id=None,
-            resource_type=None,
-            resource_id=None,
-            detail=None,
-            ip_address=None,
-            success=True,
-            node_id=None,
-        )
+        defaults = {
+            "id": "test-id-1",
+            "action": "test.action",
+            "user_id": None,
+            "resource_type": None,
+            "resource_id": None,
+            "detail": None,
+            "ip_address": None,
+            "success": True,
+            "node_id": None,
+        }
         defaults.update(kwargs)
         return AuditLog(**defaults)
 

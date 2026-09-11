@@ -138,7 +138,9 @@ class User(TimestampMixin, Base):
     )
     mfa_method: Mapped[MfaMethod | None] = mapped_column(String(16))
     totp_secret: Mapped[str | None] = mapped_column(String(255))  # Encrypted at rest
-    fido2_credentials: Mapped[str | None] = mapped_column(Text)  # JSON list of FIDO2 credential dicts, encrypted
+    fido2_credentials: Mapped[str | None] = mapped_column(
+        Text
+    )  # JSON list of FIDO2 credential dicts, encrypted
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     unix_uid: Mapped[int | None] = mapped_column(Integer)
     ssh_public_key: Mapped[str | None] = mapped_column(Text)
@@ -278,7 +280,9 @@ class AuditLog(TimestampMixin, Base):
     __tablename__ = "audit_logs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    seq: Mapped[int | None] = mapped_column(Integer, autoincrement=True, nullable=True, unique=True, index=True, server_default=None)
+    seq: Mapped[int | None] = mapped_column(
+        Integer, autoincrement=True, nullable=True, unique=True, index=True, server_default=None
+    )
     user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     action: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     resource_type: Mapped[str | None] = mapped_column(String(64))

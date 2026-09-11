@@ -12,9 +12,7 @@ from httpx import AsyncClient
 class TestHealthDashboard:
     """Tests for GET /health/dashboard."""
 
-    async def test_admin_can_access_dashboard(
-        self, admin_client: AsyncClient, admin_token: str
-    ):
+    async def test_admin_can_access_dashboard(self, admin_client: AsyncClient, admin_token: str):
         """An admin must receive a 200 response with the dashboard payload."""
         response = await admin_client.get(
             "/health/dashboard",
@@ -68,12 +66,14 @@ class TestHealthDashboard:
 
         from bastion.models import Session, SessionStatus
 
-        db_session.add(Session(
-            user_id=regular_user.id,
-            server_id=test_server.id,
-            status=SessionStatus.ACTIVE,
-            started_at=datetime.now(tz=UTC),
-        ))
+        db_session.add(
+            Session(
+                user_id=regular_user.id,
+                server_id=test_server.id,
+                status=SessionStatus.ACTIVE,
+                started_at=datetime.now(tz=UTC),
+            )
+        )
         await db_session.flush()
 
         response = await admin_client.get(
@@ -97,9 +97,7 @@ class TestHealthDashboard:
         # admin_user + regular_user = 2
         assert response.json()["active_users"] >= 2
 
-    async def test_cluster_nodes_empty_initially(
-        self, admin_client: AsyncClient, admin_token: str
-    ):
+    async def test_cluster_nodes_empty_initially(self, admin_client: AsyncClient, admin_token: str):
         """With no registered nodes, cluster_nodes must be an empty list."""
         response = await admin_client.get(
             "/health/dashboard",
@@ -181,9 +179,7 @@ class TestIpAllowlistEnforcement:
         # Should be denied — 401 (same as invalid credentials to avoid enumeration)
         assert response.status_code == 401
 
-    async def test_login_allowed_when_no_allowlist(
-        self, api_client: AsyncClient, regular_user
-    ):
+    async def test_login_allowed_when_no_allowlist(self, api_client: AsyncClient, regular_user):
         """Login must succeed when the user has no IP allowlist configured."""
         response = await api_client.post(
             "/auth/login",
@@ -258,7 +254,6 @@ class TestAccessExpiryEnforcement:
         # The RuntimeError propagates as an ExceptionGroup through Starlette's
         # BaseHTTPMiddleware on Python 3.11+ — catch it and verify it's not a
         # 403 expiry rejection.
-        import pytest as _pytest
         with patch(
             "bastion.crypto.ca.issue_certificate",
             new_callable=AsyncMock,
@@ -280,6 +275,4 @@ class TestAccessExpiryEnforcement:
             except Exception as exc:
                 # ExceptionGroup or RuntimeError propagated through middleware —
                 # this is acceptable; the test proves the expiry check was not hit
-                assert "expired" not in str(exc).lower(), (
-                    f"Unexpected expiry-related error: {exc}"
-                )
+                assert "expired" not in str(exc).lower(), f"Unexpected expiry-related error: {exc}"

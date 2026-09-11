@@ -76,9 +76,7 @@ class TestApiRequireAuthMiddleware:
         """A protected route with a Bearer token must pass through the middleware."""
         app = _make_api_app()
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            response = await c.get(
-                "/protected", headers={"Authorization": "Bearer some-token"}
-            )
+            response = await c.get("/protected", headers={"Authorization": "Bearer some-token"})
         # Middleware passes it through; the route itself returns 200
         assert response.status_code == 200
 
@@ -86,9 +84,7 @@ class TestApiRequireAuthMiddleware:
         """An Authorization header with a non-Bearer scheme must return 401."""
         app = _make_api_app()
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            response = await c.get(
-                "/protected", headers={"Authorization": "Basic dXNlcjpwYXNz"}
-            )
+            response = await c.get("/protected", headers={"Authorization": "Basic dXNlcjpwYXNz"})
         assert response.status_code == 401
 
     async def test_401_response_has_www_authenticate_header(self):
@@ -151,9 +147,7 @@ class TestAdminRequireAuthMiddleware:
         """GET /users/ with a Bearer token must pass through the middleware."""
         app = _make_admin_app()
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            response = await c.get(
-                "/users/", headers={"Authorization": "Bearer some-token"}
-            )
+            response = await c.get("/users/", headers={"Authorization": "Bearer some-token"})
         assert response.status_code == 200
 
     async def test_401_body_has_detail_field(self):

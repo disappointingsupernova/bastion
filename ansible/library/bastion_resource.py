@@ -1,5 +1,4 @@
 #!/usr/bin/python
-# -*- coding: utf-8 -*-
 """Ansible module for managing Bastion SSH bastion resources.
 
 DOCUMENTATION:
@@ -66,27 +65,33 @@ from ansible.module_utils.basic import AnsibleModule  # type: ignore[import]
 
 def run_module() -> None:
     """Entry point for the Ansible module."""
-    module_args = dict(
-        resource=dict(type="str", required=True,
-                      choices=["user", "server", "access_grant", "group", "group_member"]),
-        state=dict(type="str", default="present", choices=["present", "absent"]),
-        token=dict(type="str", no_log=True, default=""),
-        socket_path=dict(type="str", default="/opt/bastion/run/bastion-admin.sock"),
-        username=dict(type="str"),
-        email=dict(type="str"),
-        password=dict(type="str", no_log=True),
-        role=dict(type="str", default="user",
-                  choices=["admin", "user", "auditor", "read_only"]),
-        full_name=dict(type="str"),
-        user_id=dict(type="str"),
-        hostname=dict(type="str"),
-        server_id=dict(type="str"),
-        ssh_port=dict(type="int", default=22),
-        environment=dict(type="str"),
-        allow_sudo=dict(type="bool", default=False),
-        group_name=dict(type="str"),
-        group_id=dict(type="str"),
-    )
+    module_args = {
+        "resource": {
+            "type": "str",
+            "required": True,
+            "choices": ["user", "server", "access_grant", "group", "group_member"],
+        },
+        "state": {"type": "str", "default": "present", "choices": ["present", "absent"]},
+        "token": {"type": "str", "no_log": True, "default": ""},
+        "socket_path": {"type": "str", "default": "/opt/bastion/run/bastion-admin.sock"},
+        "username": {"type": "str"},
+        "email": {"type": "str"},
+        "password": {"type": "str", "no_log": True},
+        "role": {
+            "type": "str",
+            "default": "user",
+            "choices": ["admin", "user", "auditor", "read_only"],
+        },
+        "full_name": {"type": "str"},
+        "user_id": {"type": "str"},
+        "hostname": {"type": "str"},
+        "server_id": {"type": "str"},
+        "ssh_port": {"type": "int", "default": 22},
+        "environment": {"type": "str"},
+        "allow_sudo": {"type": "bool", "default": False},
+        "group_name": {"type": "str"},
+        "group_id": {"type": "str"},
+    }
 
     module = AnsibleModule(argument_spec=module_args, supports_check_mode=False)
 

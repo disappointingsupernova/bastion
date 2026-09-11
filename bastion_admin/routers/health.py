@@ -20,10 +20,10 @@ from bastion.models import (
     SessionStatus,
     SshCertificate,
     User,
+    UserRole,
     UserStatus,
 )
 from bastion_api.deps import require_role
-from bastion.models import UserRole
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/health", tags=["Health"])
@@ -64,32 +64,40 @@ async def health_dashboard(
     now = datetime.now(tz=UTC)
 
     # Active sessions
-    active_sessions = (await db.execute(
-        select(func.count(Session.id)).where(Session.status == SessionStatus.ACTIVE)
-    )).scalar_one()
+    active_sessions = (
+        await db.execute(
+            select(func.count(Session.id)).where(Session.status == SessionStatus.ACTIVE)
+        )
+    ).scalar_one()
 
     # Pending anomaly events
-    pending_anomalies = (await db.execute(
-        select(func.count(AnomalyEvent.id)).where(AnomalyEvent.alerted == False)  # noqa: E712
-    )).scalar_one()
+    pending_anomalies = (
+        await db.execute(
+            select(func.count(AnomalyEvent.id)).where(AnomalyEvent.alerted == False)  # noqa: E712
+        )
+    ).scalar_one()
 
     # Certs expiring in the next hour
     warn_before = now + timedelta(hours=1)
-    certs_expiring = (await db.execute(
-        select(func.count(SshCertificate.id)).where(
-            SshCertificate.status == CertStatus.ACTIVE,
-            SshCertificate.valid_before <= warn_before,
-            SshCertificate.valid_before > now,
+    certs_expiring = (
+        await db.execute(
+            select(func.count(SshCertificate.id)).where(
+                SshCertificate.status == CertStatus.ACTIVE,
+                SshCertificate.valid_before <= warn_before,
+                SshCertificate.valid_before > now,
+            )
         )
-    )).scalar_one()
+    ).scalar_one()
 
     # Active users
-    active_users = (await db.execute(
-        select(func.count(User.id)).where(
-            User.status == UserStatus.ACTIVE,
-            User.deleted_at.is_(None),
+    active_users = (
+        await db.execute(
+            select(func.count(User.id)).where(
+                User.status == UserStatus.ACTIVE,
+                User.deleted_at.is_(None),
+            )
         )
-    )).scalar_one()
+    ).scalar_one()
 
     # DB size
     db_size: int | None = None

@@ -6,7 +6,6 @@ import os
 import tempfile
 import time
 from pathlib import Path
-from typing import Optional
 
 import httpx
 import jwt as _jwt
@@ -47,9 +46,12 @@ def _api_client(admin: bool = False) -> httpx.Client:
 
 def _load_token() -> str | None:
     """Load the stored access token from the user's home directory."""
-    if _TOKEN_FILE.exists():
-        return _TOKEN_FILE.read_text().strip()
-    return None
+    try:
+        raw = _TOKEN_FILE.read_text(encoding="utf-8")
+        stripped: str = raw.strip()  # type: ignore[assignment]
+        return stripped or None
+    except OSError:
+        return None
 
 
 def _load_refresh_token() -> str | None:
@@ -124,7 +126,9 @@ def _auth_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _complete_hostnames(ctx: typer.Context, param: typer.CallbackParam, incomplete: str) -> list[str]:
+def _complete_hostnames(
+    ctx: typer.Context, param: typer.CallbackParam, incomplete: str
+) -> list[str]:
     """Shell completion callback — returns server hostnames matching the incomplete string."""
     token = _load_token()
     if not token:
@@ -200,7 +204,7 @@ def connect(
         help="Hostname of the server to connect to.",
         autocompletion=_complete_hostnames,
     ),
-    identity: Optional[Path] = typer.Option(
+    identity: Path | None = typer.Option(
         None, "--identity", "-i", help="Path to your SSH private key."
     ),
 ) -> None:
@@ -264,11 +268,16 @@ def connect(
             "ssh",
             [
                 "ssh",
-                "-i", str(key_path),
-                "-o", f"CertificateFile={cert_file}",
-                "-o", f"UserKnownHostsFile={known_hosts_file}",
-                "-o", "StrictHostKeyChecking=yes",
-                "-p", str(port),
+                "-i",
+                str(key_path),
+                "-o",
+                f"CertificateFile={cert_file}",
+                "-o",
+                f"UserKnownHostsFile={known_hosts_file}",
+                "-o",
+                "StrictHostKeyChecking=yes",
+                "-p",
+                str(port),
                 f"{remote_user}@{hostname}",
             ],
         )
@@ -324,7 +333,7 @@ def sessions(
 
 @app.command()
 def cert(
-    identity: Optional[Path] = typer.Option(
+    identity: Path | None = typer.Option(
         None, "--identity", "-i", help="Path to your SSH public key."
     ),
 ) -> None:

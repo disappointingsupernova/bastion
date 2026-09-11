@@ -103,9 +103,7 @@ class TestComplianceReportDownload:
         assert "server" in content
         assert "sudo" in content
 
-    async def test_days_parameter_respected(
-        self, admin_client: AsyncClient, admin_token: str
-    ):
+    async def test_days_parameter_respected(self, admin_client: AsyncClient, admin_token: str):
         """The days parameter must be accepted without error."""
         response = await admin_client.get(
             "/compliance/reports/sessions",
@@ -124,9 +122,7 @@ class TestComplianceReportDownload:
 class TestComplianceReportEmail:
     """Tests for POST /compliance/reports/email."""
 
-    async def test_missing_smtp_returns_503(
-        self, admin_client: AsyncClient, admin_token: str
-    ):
+    async def test_missing_smtp_returns_503(self, admin_client: AsyncClient, admin_token: str):
         """When no email transport is configured, the endpoint must return 503."""
         response = await admin_client.post(
             "/compliance/reports/email",
@@ -156,9 +152,7 @@ class TestComplianceReportEmail:
         )
         assert response.status_code == 400
 
-    async def test_invalid_email_returns_422(
-        self, admin_client: AsyncClient, admin_token: str
-    ):
+    async def test_invalid_email_returns_422(self, admin_client: AsyncClient, admin_token: str):
         """An invalid recipient email must return 422."""
         response = await admin_client.post(
             "/compliance/reports/email",

@@ -107,9 +107,7 @@ def decrypt_recording(encrypted_path: Path, age_identity_content: str) -> bytes:
             timeout=60,
         )
         if result.returncode != 0:
-            raise RuntimeError(
-                f"age decryption failed: {result.stderr.decode(errors='replace')}"
-            )
+            raise RuntimeError(f"age decryption failed: {result.stderr.decode(errors='replace')}")
         return result.stdout
     finally:
         identity_path.unlink(missing_ok=True)

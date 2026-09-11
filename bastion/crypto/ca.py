@@ -251,6 +251,7 @@ async def revoke_certificate(
     # Queue KRL distribution to all managed servers
     try:
         from celery import current_app as celery_app
+
         celery_app.send_task("workers.tasks.notifications.distribute_krl")
         log.info("KRL distribution task queued after revocation", cert_id=cert_id)
     except Exception as exc:
@@ -290,10 +291,10 @@ async def issue_host_certificate(
     key_id = f"bastion-host-{serial}"
     # Principals for a host cert are the hostnames/IPs the cert is valid for
     principal = server_hostname
-    if not _PRINCIPAL_RE.match(principal.replace(".", "").replace("-", "")):
-        # Hostnames may contain dots — use a relaxed check for host certs
-        if not all(c.isalnum() or c in ".-_" for c in principal):
-            raise ValueError(f"Invalid hostname {principal!r} for host certificate")
+    if not _PRINCIPAL_RE.match(principal.replace(".", "").replace("-", "")) and not all(
+        c.isalnum() or c in ".-_" for c in principal
+    ):
+        raise ValueError(f"Invalid hostname {principal!r} for host certificate")
 
     with tempfile.TemporaryDirectory(prefix="bastion-hostcert-") as tmpdir:
         tmp = Path(tmpdir)
@@ -304,12 +305,17 @@ async def issue_host_certificate(
         result = subprocess.run(
             [
                 "ssh-keygen",
-                "-s", str(settings.ca_key_path),
-                "-I", key_id,
+                "-s",
+                str(settings.ca_key_path),
+                "-I",
+                key_id,
                 "-h",  # host certificate flag
-                "-n", principal,
-                "-V", f"+{hours}h",
-                "-z", str(serial),
+                "-n",
+                principal,
+                "-V",
+                f"+{hours}h",
+                "-z",
+                str(serial),
                 str(pub_key_file),
             ],
             capture_output=True,
@@ -318,7 +324,9 @@ async def issue_host_certificate(
         )
 
         if result.returncode != 0:
-            log.error("Host certificate issuance failed", hostname=server_hostname, stderr=result.stderr)
+            log.error(
+                "Host certificate issuance failed", hostname=server_hostname, stderr=result.stderr
+            )
             raise RuntimeError(f"ssh-keygen failed: {result.stderr}")
 
         cert_file = pub_key_file.with_name("host-cert.pub")

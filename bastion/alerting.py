@@ -190,7 +190,6 @@ async def _send_pushover(subject: str, body: str, severity: AlertSeverity, confi
 
 async def _send_webhook(subject: str, body: str, severity: AlertSeverity, config: dict) -> None:
     """Send an alert to a generic outbound webhook with HMAC-SHA256 signature."""
-    import hashlib
     import hmac as _hmac
     import time
 

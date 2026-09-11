@@ -46,7 +46,8 @@ def _load_credentials(user: User, secret_key: str) -> list[dict[str, Any]]:
     if not user.fido2_credentials:
         return []
     try:
-        return json.loads(decrypt_secret(user.fido2_credentials, secret_key))
+        result: list[dict[str, Any]] = json.loads(decrypt_secret(user.fido2_credentials, secret_key))
+        return result
     except Exception:
         log.error("Failed to decrypt FIDO2 credentials", user_id=user.id)
         return []
@@ -65,9 +66,9 @@ def begin_registration(user_id: str, username: str) -> dict[str, Any]:
         name=username,
         display_name=username,
     )
-    options, _ = server.register_begin(user_entity, user_verification="preferred")
+    options, _ = server.register_begin(user_entity, user_verification="preferred")  # type: ignore[arg-type]
     # Convert to JSON-serialisable dict
-    return dict(options)
+    return dict(options)  # type: ignore[return-value]
 
 
 async def complete_registration(
@@ -81,7 +82,7 @@ async def complete_registration(
     try:
         client_data = CollectedClientData(credential_response["clientDataJSON"])
         att_obj = AttestationObject(credential_response["attestationObject"])
-        auth_data = server.register_complete(None, client_data, att_obj)
+        auth_data = server.register_complete(None, client_data, att_obj)  # type: ignore[call-arg,arg-type]
     except Exception as exc:
         log.warning("FIDO2 registration failed", error=str(exc))
         raise HTTPException(
@@ -92,8 +93,8 @@ async def complete_registration(
     creds = _load_credentials(user, secret_key)
     creds.append(
         {
-            "credential_id": auth_data.credential_data.credential_id.hex(),
-            "public_key": auth_data.credential_data.public_key.__class__.__name__,
+            "credential_id": auth_data.credential_data.credential_id.hex(),  # type: ignore[union-attr]
+            "public_key": auth_data.credential_data.public_key.__class__.__name__,  # type: ignore[union-attr]
             "sign_count": auth_data.counter,
         }
     )
@@ -122,7 +123,7 @@ async def begin_authentication(
         )
 
     server = _server()
-    options, state = server.authenticate_begin(user_verification="preferred")
+    options, state = server.authenticate_begin(user_verification="preferred")  # type: ignore[arg-type]
 
     state_token = jwt.encode(
         {
@@ -179,10 +180,10 @@ async def complete_authentication(
         signature = bytes.fromhex(credential_response["signature"])
         credential_id = bytes.fromhex(credential_response["credentialId"])
 
-        server.authenticate_complete(
+        server.authenticate_complete(  # type: ignore[call-arg,arg-type,misc]
             state,
-            [bytes.fromhex(c["credential_id"]) for c in creds],
-            credential_id,
+            [bytes.fromhex(c["credential_id"]) for c in creds],  # type: ignore[arg-type,misc]
+            credential_id,  # type: ignore[arg-type]
             client_data,
             auth_data,
             signature,

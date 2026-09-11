@@ -23,7 +23,9 @@ class BastionClientError(Exception):
 # ── Module-level helpers ──────────────────────────────────────────────────────
 
 
-def make_http_client(token: str, socket_path: str, base_url: str = "http://bastion") -> httpx.Client:
+def make_http_client(
+    token: str, socket_path: str, base_url: str = "http://bastion"
+) -> httpx.Client:
     """Return a configured httpx.Client for the given Unix socket and token.
 
     Extracted as a standalone function so it can be replaced in tests without
@@ -92,16 +94,14 @@ class BastionClient:
         username: str,
         password: str,
         socket_path: str = "/opt/bastion/run/bastion-api.sock",
-    ) -> "BastionClient":
+    ) -> BastionClient:
         """Authenticate and return a client with a valid access token.
 
         Uses the user-facing API socket for login, then switches to the admin
         socket for subsequent calls. The caller must have the admin role.
         """
         with make_http_client("", socket_path) as client:
-            response = client.post(
-                "/auth/login", json={"username": username, "password": password}
-            )
+            response = client.post("/auth/login", json={"username": username, "password": password})
         if not response.is_success:
             raise BastionClientError(response.status_code, response.json().get("detail", ""))
         data = response.json()

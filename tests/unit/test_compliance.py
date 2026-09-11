@@ -12,20 +12,17 @@ from bastion.compliance import (
     _rows_to_csv,
     build_report,
     generate_access_matrix,
-    generate_cert_history,
     generate_failed_auth_summary,
     generate_sessions_report,
 )
 from bastion.models import (
     AuditLog,
-    CertStatus,
     OsFamily,
     Server,
     ServerAccess,
     ServerStatus,
     Session,
     SessionStatus,
-    SshCertificate,
     User,
     UserRole,
     UserStatus,
@@ -97,9 +94,7 @@ class TestGenerateAccessMatrix:
         db_session.add(server)
         await db_session.flush()
 
-        access = ServerAccess(
-            user_id=user.id, server_id=server.id, allow_sudo=False
-        )
+        access = ServerAccess(user_id=user.id, server_id=server.id, allow_sudo=False)
         db_session.add(access)
         await db_session.flush()
 
@@ -197,14 +192,16 @@ class TestGenerateSessionsReport:
 
         now = datetime.now(tz=UTC)
         for _ in range(3):
-            db_session.add(Session(
-                user_id=user.id,
-                server_id=server.id,
-                status=SessionStatus.COMPLETED,
-                started_at=now,
-                bytes_sent=100,
-                bytes_received=200,
-            ))
+            db_session.add(
+                Session(
+                    user_id=user.id,
+                    server_id=server.id,
+                    status=SessionStatus.COMPLETED,
+                    started_at=now,
+                    bytes_sent=100,
+                    bytes_received=200,
+                )
+            )
         await db_session.flush()
 
         result = await generate_sessions_report(db_session)
@@ -221,12 +218,14 @@ class TestGenerateSessionsReport:
         await db_session.flush()
 
         old_time = datetime.now(tz=UTC) - timedelta(days=60)
-        db_session.add(Session(
-            user_id=user.id,
-            server_id=server.id,
-            status=SessionStatus.COMPLETED,
-            started_at=old_time,
-        ))
+        db_session.add(
+            Session(
+                user_id=user.id,
+                server_id=server.id,
+                status=SessionStatus.COMPLETED,
+                started_at=old_time,
+            )
+        )
         await db_session.flush()
 
         result = await generate_sessions_report(db_session, days=30)
@@ -250,13 +249,15 @@ class TestGenerateFailedAuthSummary:
 
         now = datetime.now(tz=UTC)
         for _ in range(5):
-            db_session.add(AuditLog(
-                user_id=user.id,
-                action="auth.login",
-                success=False,
-                created_at=now,
-                updated_at=now,
-            ))
+            db_session.add(
+                AuditLog(
+                    user_id=user.id,
+                    action="auth.login",
+                    success=False,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
         await db_session.flush()
 
         result = await generate_failed_auth_summary(db_session)
@@ -271,10 +272,15 @@ class TestGenerateFailedAuthSummary:
         await db_session.flush()
 
         now = datetime.now(tz=UTC)
-        db_session.add(AuditLog(
-            user_id=user.id, action="auth.login", success=True,
-            created_at=now, updated_at=now,
-        ))
+        db_session.add(
+            AuditLog(
+                user_id=user.id,
+                action="auth.login",
+                success=True,
+                created_at=now,
+                updated_at=now,
+            )
+        )
         await db_session.flush()
 
         result = await generate_failed_auth_summary(db_session)

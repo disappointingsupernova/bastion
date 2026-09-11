@@ -110,7 +110,6 @@ async def connect(
         )
 
     # ── Server IP allowlist check ─────────────────────────────────────────────
-    from bastion_api.deps import get_client_ip
     # source_ip is recorded on the session; check server allowlist
     if not check_ip_allowed("unix-socket", server.ip_allowlist):
         raise HTTPException(

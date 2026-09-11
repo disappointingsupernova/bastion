@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -62,14 +61,21 @@ async def create_group(
         select(UserGroup).where(UserGroup.name == body.name, UserGroup.deleted_at.is_(None))
     )
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Group name already exists.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Group name already exists."
+        )
 
     group = UserGroup(name=body.name, description=body.description)
     db.add(group)
     await db.flush()
     await audit(
-        db, "admin.group.create", success=True, user_id=current_user.id,
-        resource_type="group", resource_id=group.id, detail={"name": body.name},
+        db,
+        "admin.group.create",
+        success=True,
+        user_id=current_user.id,
+        resource_type="group",
+        resource_id=group.id,
+        detail={"name": body.name},
     )
     log.info("User group created", name=body.name, created_by=current_user.username)
     return GroupResponse(id=group.id, name=group.name, description=group.description)
@@ -90,10 +96,14 @@ async def list_groups(
         count_result = await db.execute(
             select(UserGroupMembership).where(UserGroupMembership.group_id == g.id)
         )
-        out.append(GroupResponse(
-            id=g.id, name=g.name, description=g.description,
-            member_count=len(count_result.scalars().all()),
-        ))
+        out.append(
+            GroupResponse(
+                id=g.id,
+                name=g.name,
+                description=g.description,
+                member_count=len(count_result.scalars().all()),
+            )
+        )
     return out
 
 
@@ -105,24 +115,28 @@ async def add_member(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Add a user to a group. Automatically provisions them on all group servers."""
-    group = (await db.execute(
-        select(UserGroup).where(UserGroup.id == group_id, UserGroup.deleted_at.is_(None))
-    )).scalar_one_or_none()
+    group = (
+        await db.execute(
+            select(UserGroup).where(UserGroup.id == group_id, UserGroup.deleted_at.is_(None))
+        )
+    ).scalar_one_or_none()
     if group is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found.")
 
-    user = (await db.execute(
-        select(User).where(User.id == user_id, User.deleted_at.is_(None))
-    )).scalar_one_or_none()
+    user = (
+        await db.execute(select(User).where(User.id == user_id, User.deleted_at.is_(None)))
+    ).scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
-    existing = (await db.execute(
-        select(UserGroupMembership).where(
-            UserGroupMembership.user_id == user_id,
-            UserGroupMembership.group_id == group_id,
+    existing = (
+        await db.execute(
+            select(UserGroupMembership).where(
+                UserGroupMembership.user_id == user_id,
+                UserGroupMembership.group_id == group_id,
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already in group.")
 
@@ -137,25 +151,33 @@ async def add_member(
         )
     )
     for gsa in group_access_result.scalars().all():
-        existing_access = (await db.execute(
-            select(ServerAccess).where(
-                ServerAccess.user_id == user_id,
-                ServerAccess.server_id == gsa.server_id,
-                ServerAccess.revoked_at.is_(None),
+        existing_access = (
+            await db.execute(
+                select(ServerAccess).where(
+                    ServerAccess.user_id == user_id,
+                    ServerAccess.server_id == gsa.server_id,
+                    ServerAccess.revoked_at.is_(None),
+                )
             )
-        )).scalar_one_or_none()
+        ).scalar_one_or_none()
         if not existing_access:
-            db.add(ServerAccess(
-                user_id=user_id,
-                server_id=gsa.server_id,
-                allow_sudo=gsa.allow_sudo,
-                remote_username=gsa.remote_username,
-            ))
+            db.add(
+                ServerAccess(
+                    user_id=user_id,
+                    server_id=gsa.server_id,
+                    allow_sudo=gsa.allow_sudo,
+                    remote_username=gsa.remote_username,
+                )
+            )
 
     await db.flush()
     await audit(
-        db, "admin.group.member.add", success=True, user_id=current_user.id,
-        resource_type="group", resource_id=group_id,
+        db,
+        "admin.group.member.add",
+        success=True,
+        user_id=current_user.id,
+        resource_type="group",
+        resource_id=group_id,
         detail={"added_user_id": user_id},
     )
     log.info("User added to group", user_id=user_id, group_id=group_id)
@@ -169,20 +191,26 @@ async def remove_member(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Remove a user from a group."""
-    membership = (await db.execute(
-        select(UserGroupMembership).where(
-            UserGroupMembership.user_id == user_id,
-            UserGroupMembership.group_id == group_id,
+    membership = (
+        await db.execute(
+            select(UserGroupMembership).where(
+                UserGroupMembership.user_id == user_id,
+                UserGroupMembership.group_id == group_id,
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if membership is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membership not found.")
 
     await db.delete(membership)
     await db.flush()
     await audit(
-        db, "admin.group.member.remove", success=True, user_id=current_user.id,
-        resource_type="group", resource_id=group_id,
+        db,
+        "admin.group.member.remove",
+        success=True,
+        user_id=current_user.id,
+        resource_type="group",
+        resource_id=group_id,
         detail={"removed_user_id": user_id},
     )
 
@@ -195,15 +223,19 @@ async def grant_group_server_access(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Grant a group access to a server. All current members are provisioned immediately."""
-    group = (await db.execute(
-        select(UserGroup).where(UserGroup.id == group_id, UserGroup.deleted_at.is_(None))
-    )).scalar_one_or_none()
+    group = (
+        await db.execute(
+            select(UserGroup).where(UserGroup.id == group_id, UserGroup.deleted_at.is_(None))
+        )
+    ).scalar_one_or_none()
     if group is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found.")
 
-    server = (await db.execute(
-        select(Server).where(Server.id == body.server_id, Server.deleted_at.is_(None))
-    )).scalar_one_or_none()
+    server = (
+        await db.execute(
+            select(Server).where(Server.id == body.server_id, Server.deleted_at.is_(None))
+        )
+    ).scalar_one_or_none()
     if server is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found.")
 
@@ -221,27 +253,43 @@ async def grant_group_server_access(
     )
     provisioned = 0
     for m in members_result.scalars().all():
-        existing = (await db.execute(
-            select(ServerAccess).where(
-                ServerAccess.user_id == m.user_id,
-                ServerAccess.server_id == body.server_id,
-                ServerAccess.revoked_at.is_(None),
+        existing = (
+            await db.execute(
+                select(ServerAccess).where(
+                    ServerAccess.user_id == m.user_id,
+                    ServerAccess.server_id == body.server_id,
+                    ServerAccess.revoked_at.is_(None),
+                )
             )
-        )).scalar_one_or_none()
+        ).scalar_one_or_none()
         if not existing:
-            db.add(ServerAccess(
-                user_id=m.user_id,
-                server_id=body.server_id,
-                allow_sudo=body.allow_sudo,
-                remote_username=body.remote_username,
-            ))
+            db.add(
+                ServerAccess(
+                    user_id=m.user_id,
+                    server_id=body.server_id,
+                    allow_sudo=body.allow_sudo,
+                    remote_username=body.remote_username,
+                )
+            )
             provisioned += 1
 
     await db.flush()
     await audit(
-        db, "admin.group.server.grant", success=True, user_id=current_user.id,
-        resource_type="group", resource_id=group_id,
+        db,
+        "admin.group.server.grant",
+        success=True,
+        user_id=current_user.id,
+        resource_type="group",
+        resource_id=group_id,
         detail={"server_id": body.server_id, "provisioned_members": provisioned},
     )
-    log.info("Group server access granted", group_id=group_id, server_id=body.server_id, provisioned=provisioned)
-    return {"message": f"Access granted. {provisioned} members provisioned.", "group_server_access_id": gsa.id}
+    log.info(
+        "Group server access granted",
+        group_id=group_id,
+        server_id=body.server_id,
+        provisioned=provisioned,
+    )
+    return {
+        "message": f"Access granted. {provisioned} members provisioned.",
+        "group_server_access_id": gsa.id,
+    }

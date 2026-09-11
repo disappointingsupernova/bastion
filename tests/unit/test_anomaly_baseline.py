@@ -8,11 +8,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from bastion.anomaly import (
-    ET_ACCOUNT_DORMANT,
-    ET_FAILED_AUTH_BURST,
-    ET_NEW_IP,
-    ET_OFF_HOURS,
-    ET_WEEKEND_ACCESS,
     _deviation_score,
     update_baseline,
 )
@@ -107,14 +102,26 @@ class TestUpdateBaseline:
         await db_session.flush()
 
         now = datetime.now(tz=UTC)
-        db_session.add(AuditLog(
-            user_id=user.id, action="auth.login", success=True,
-            ip_address="10.0.0.1", created_at=now, updated_at=now,
-        ))
-        db_session.add(AuditLog(
-            user_id=user.id, action="auth.login", success=True,
-            ip_address="10.0.0.2", created_at=now, updated_at=now,
-        ))
+        db_session.add(
+            AuditLog(
+                user_id=user.id,
+                action="auth.login",
+                success=True,
+                ip_address="10.0.0.1",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        db_session.add(
+            AuditLog(
+                user_id=user.id,
+                action="auth.login",
+                success=True,
+                ip_address="10.0.0.2",
+                created_at=now,
+                updated_at=now,
+            )
+        )
         await db_session.flush()
 
         await update_baseline(db_session, user.id)
@@ -137,10 +144,16 @@ class TestUpdateBaseline:
 
         # Create a login at a specific hour
         login_time = datetime.now(tz=UTC).replace(hour=14, minute=0, second=0, microsecond=0)
-        db_session.add(AuditLog(
-            user_id=user.id, action="auth.login", success=True,
-            ip_address="1.2.3.4", created_at=login_time, updated_at=login_time,
-        ))
+        db_session.add(
+            AuditLog(
+                user_id=user.id,
+                action="auth.login",
+                success=True,
+                ip_address="1.2.3.4",
+                created_at=login_time,
+                updated_at=login_time,
+            )
+        )
         await db_session.flush()
 
         await update_baseline(db_session, user.id)
@@ -200,9 +213,13 @@ class TestUpdateBaseline:
 
         # First session: 10 minutes, 1000 bytes
         s1 = Session(
-            user_id=user.id, server_id=server.id, status=SessionStatus.COMPLETED,
-            started_at=now - timedelta(minutes=10), ended_at=now,
-            bytes_sent=500, bytes_received=500,
+            user_id=user.id,
+            server_id=server.id,
+            status=SessionStatus.COMPLETED,
+            started_at=now - timedelta(minutes=10),
+            ended_at=now,
+            bytes_sent=500,
+            bytes_received=500,
         )
         db_session.add(s1)
         await db_session.flush()
@@ -210,9 +227,13 @@ class TestUpdateBaseline:
 
         # Second session: 60 minutes, 10000 bytes
         s2 = Session(
-            user_id=user.id, server_id=server.id, status=SessionStatus.COMPLETED,
-            started_at=now - timedelta(minutes=60), ended_at=now,
-            bytes_sent=5000, bytes_received=5000,
+            user_id=user.id,
+            server_id=server.id,
+            status=SessionStatus.COMPLETED,
+            started_at=now - timedelta(minutes=60),
+            ended_at=now,
+            bytes_sent=5000,
+            bytes_received=5000,
         )
         db_session.add(s2)
         await db_session.flush()

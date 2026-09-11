@@ -170,6 +170,7 @@ async def update_user(
         user.ssh_public_key_updated_at = datetime.now(tz=UTC)
     if body.ip_allowlist is not None:
         import json
+
         user.ip_allowlist = json.dumps(body.ip_allowlist)
 
     await db.flush()

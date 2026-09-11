@@ -7,7 +7,6 @@ break the chain from that point forward, making tampering detectable.
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 import json
 from typing import Any
@@ -55,18 +54,20 @@ def _compute_integrity_hash(entry: AuditLog, secret_key: str, previous_hash: str
     forming a chain. Keyed with the application SECRET_KEY so the chain
     cannot be forged without access to the key.
     """
-    chain_input = "|".join([
-        entry.id,
-        entry.action,
-        str(entry.user_id or ""),
-        str(entry.resource_type or ""),
-        str(entry.resource_id or ""),
-        str(entry.detail or ""),
-        str(entry.ip_address or ""),
-        str(entry.success),
-        str(entry.node_id or ""),
-        previous_hash or "GENESIS",
-    ])
+    chain_input = "|".join(
+        [
+            entry.id,
+            entry.action,
+            str(entry.user_id or ""),
+            str(entry.resource_type or ""),
+            str(entry.resource_id or ""),
+            str(entry.detail or ""),
+            str(entry.ip_address or ""),
+            str(entry.success),
+            str(entry.node_id or ""),
+            previous_hash or "GENESIS",
+        ]
+    )
     return hmac.new(
         secret_key.encode(),
         chain_input.encode(),
@@ -149,9 +150,7 @@ async def verify_audit_chain(db: AsyncSession) -> tuple[bool, int, str | None]:
 
     settings = get_settings()
 
-    result = await db.execute(
-        select(AuditLog).order_by(AuditLog.seq.asc())
-    )
+    result = await db.execute(select(AuditLog).order_by(AuditLog.seq.asc()))
     entries = result.scalars().all()
 
     previous_hash: str | None = None

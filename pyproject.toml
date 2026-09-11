@@ -119,6 +119,11 @@ warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "cli.main"
+# Path.read_text() is typed as Any in Python 3.14's typeshed stub — suppress
+warn_return_any = false
+
 # ── pytest ────────────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
