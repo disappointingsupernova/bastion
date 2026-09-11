@@ -1,0 +1,36 @@
+# Example usage — copy to terraform.tfvars and fill in real values.
+# Set TF_VAR_bastion_token=<admin-jwt> before running terraform apply.
+
+bastion_users = {
+  alice = {
+    username  = "alice"
+    email     = "alice@example.com"
+    role      = "user"
+    full_name = "Alice Smith"
+  }
+  bob = {
+    username = "bob"
+    email    = "bob@example.com"
+    role     = "auditor"
+  }
+}
+
+bastion_servers = {
+  web01 = {
+    hostname    = "web01.example.com"
+    environment = "production"
+    ssh_port    = 22
+  }
+  staging = {
+    hostname    = "staging.example.com"
+    environment = "staging"
+  }
+}
+
+bastion_access_grants = {
+  alice_web01 = {
+    user_id    = "alice-user-id"
+    server_id  = "web01-server-id"
+    allow_sudo = false
+  }
+}

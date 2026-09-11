@@ -1,0 +1,58 @@
+---
+# Example Ansible playbook — manage Bastion users, servers, and access grants.
+# Run on the bastion host with BASTION_TOKEN set in the environment.
+#
+# Usage:
+#   BASTION_TOKEN=<admin-jwt> ansible-playbook -i localhost, bastion_example.yml
+
+- name: Manage Bastion resources
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    bastion_token: "{{ lookup('env', 'BASTION_TOKEN') }}"
+
+  tasks:
+    - name: Create user alice
+      bastion_resource:
+        resource: user
+        state: present
+        token: "{{ bastion_token }}"
+        username: alice
+        email: alice@example.com
+        role: user
+        full_name: Alice Smith
+
+    - name: Onboard production web server
+      bastion_resource:
+        resource: server
+        state: present
+        token: "{{ bastion_token }}"
+        hostname: web01.example.com
+        environment: production
+        ssh_port: 22
+
+    - name: Grant alice access to web01
+      bastion_resource:
+        resource: access_grant
+        state: present
+        token: "{{ bastion_token }}"
+        user_id: "{{ alice_user_id }}"
+        server_id: "{{ web01_server_id }}"
+        allow_sudo: false
+
+    - name: Create ops team group
+      bastion_resource:
+        resource: group
+        state: present
+        token: "{{ bastion_token }}"
+        group_name: ops-team
+
+    - name: Add alice to ops-team
+      bastion_resource:
+        resource: group_member
+        state: present
+        token: "{{ bastion_token }}"
+        group_id: "{{ ops_group_id }}"
+        user_id: "{{ alice_user_id }}"
