@@ -211,6 +211,8 @@ def backup_database(self) -> None:
 
 async def _backup_database() -> None:
     """Async implementation of database backup."""
+    import shutil
+    import sqlite3 as _sqlite3
     import subprocess
     import tempfile
     from datetime import UTC, datetime
@@ -227,18 +229,18 @@ async def _backup_database() -> None:
         if settings.db_backend == DatabaseBackend.SQLITE:
             db_path = settings.bastion_root / "data" / "bastion.db"
             backup_file = tmp / f"bastion_{ts}.db"
-            # Use SQLite's online backup via the .backup command
-            result = subprocess.run(
-                ["sqlite3", str(db_path), f".backup {backup_file}"],
-                capture_output=True,
-                timeout=60,
-            )
-            if result.returncode != 0:
-                raise RuntimeError(f"SQLite backup failed: {result.stderr.decode()}")
+            # Use Python's sqlite3 online backup API — no external binary required
+            src = _sqlite3.connect(str(db_path))
+            dst = _sqlite3.connect(str(backup_file))
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+                src.close()
         else:
             backup_file = tmp / f"bastion_{ts}.sql.gz"
             result = subprocess.run(
-                ["pg_dump", settings.db_url, "--compress=9", f"--file={backup_file}"],
+                ["pg_dump", "--dbname", settings.db_url, "--compress=9", f"--file={backup_file}"],
                 capture_output=True,
                 timeout=300,
             )
@@ -253,10 +255,8 @@ async def _backup_database() -> None:
             )
             log.info("Database backup uploaded to S3", key=s3_key, bucket=settings.recordings_s3_bucket)
         else:
-            # Copy to local backup directory
             backup_dir = settings.bastion_root / "data" / "backups"
             backup_dir.mkdir(exist_ok=True)
-            import shutil
             shutil.copy2(str(backup_file), str(backup_dir / backup_file.name))
             log.info("Database backup saved locally", path=str(backup_dir / backup_file.name))
 
