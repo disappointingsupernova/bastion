@@ -6,8 +6,6 @@ bastion host itself or via SSH forwarding.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -20,6 +18,44 @@ class BastionClientError(Exception):
         self.status_code = status_code
         self.detail = detail
         super().__init__(f"HTTP {status_code}: {detail}")
+
+
+# ── Module-level helpers ──────────────────────────────────────────────────────
+
+
+def make_http_client(token: str, socket_path: str, base_url: str = "http://bastion") -> httpx.Client:
+    """Return a configured httpx.Client for the given Unix socket and token.
+
+    Extracted as a standalone function so it can be replaced in tests without
+    subclassing BastionClient.
+    """
+    return httpx.Client(
+        transport=httpx.HTTPTransport(uds=socket_path),
+        base_url=base_url,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30.0,
+    )
+
+
+def check_response(response: httpx.Response) -> dict[str, Any]:
+    """Raise BastionClientError on non-2xx responses, else return parsed JSON.
+
+    Returns an empty dict for successful responses with no body (e.g. 204).
+    Extracted as a standalone function so error-handling logic can be tested
+    independently of the HTTP transport.
+    """
+    if response.is_success:
+        if response.content:
+            return response.json()  # type: ignore[no-any-return]
+        return {}
+    try:
+        detail = response.json().get("detail", response.text)
+    except Exception:
+        detail = response.text
+    raise BastionClientError(response.status_code, detail)
+
+
+# ── Client class ──────────────────────────────────────────────────────────────
 
 
 class BastionClient:
@@ -38,29 +74,15 @@ class BastionClient:
         socket_path: str = "/opt/bastion/run/bastion-admin.sock",
     ) -> None:
         self._token = token
-        self._transport = httpx.HTTPTransport(uds=socket_path)
-        self._base = "http://bastion"
+        self._socket_path = socket_path
 
     def _client(self) -> httpx.Client:
-        """Return a configured httpx client."""
-        return httpx.Client(
-            transport=self._transport,
-            base_url=self._base,
-            headers={"Authorization": f"Bearer {self._token}"},
-            timeout=30.0,
-        )
+        """Return a configured httpx client for this instance."""
+        return make_http_client(self._token, self._socket_path)
 
     def _check(self, response: httpx.Response) -> dict[str, Any]:
-        """Raise BastionClientError on non-2xx responses, else return JSON."""
-        if response.is_success:
-            if response.content:
-                return response.json()  # type: ignore[no-any-return]
-            return {}
-        try:
-            detail = response.json().get("detail", response.text)
-        except Exception:
-            detail = response.text
-        raise BastionClientError(response.status_code, detail)
+        """Delegate to the module-level check_response function."""
+        return check_response(response)
 
     # ── Authentication ────────────────────────────────────────────────────────
 
@@ -76,8 +98,7 @@ class BastionClient:
         Uses the user-facing API socket for login, then switches to the admin
         socket for subsequent calls. The caller must have the admin role.
         """
-        transport = httpx.HTTPTransport(uds=socket_path)
-        with httpx.Client(transport=transport, base_url="http://bastion") as client:
+        with make_http_client("", socket_path) as client:
             response = client.post(
                 "/auth/login", json={"username": username, "password": password}
             )

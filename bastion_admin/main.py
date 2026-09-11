@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse
 
 from bastion.config import get_settings
 from bastion.logging import configure_logging, get_logger
+from bastion_admin.middleware.auth import RequireAuthMiddleware
 from bastion_admin.routers import audit, certificates, servers, users
 from bastion_admin.routers.access_requests import router as access_requests_router
 from bastion_admin.routers.compliance import router as compliance_router
@@ -20,8 +21,6 @@ from bastion_admin.routers.import_users import router as import_router
 from bastion_admin.routers.sessions import router as admin_sessions_router
 
 log = get_logger(__name__)
-
-_PUBLIC_PATHS = {"/health"}
 
 
 @asynccontextmanager
@@ -40,11 +39,12 @@ app = FastAPI(
     title="Bastion Admin API",
     description="SSH Bastion administrative API — restricted access only",
     version="0.1.0",
-    # Docs enabled only in non-production; served behind auth below
     docs_url=None,
     redoc_url=None,
     lifespan=lifespan,
 )
+
+app.add_middleware(RequireAuthMiddleware)
 
 app.include_router(users.router)
 app.include_router(servers.router)
@@ -57,25 +57,6 @@ app.include_router(compliance_router)
 app.include_router(groups_router)
 app.include_router(health_router)
 app.include_router(import_router)
-
-
-@app.middleware("http")
-async def require_auth_middleware(request: Request, call_next):
-    """Global authentication safety net for the admin API.
-
-    Every route except /health must carry a valid Bearer token.
-    """
-    if request.url.path in _PUBLIC_PATHS:
-        return await call_next(request)
-
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return JSONResponse(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            content={"detail": "Authentication required."},
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return await call_next(request)
 
 
 @app.get("/health", include_in_schema=False)
@@ -115,6 +96,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         "Unhandled exception in admin API", path=request.url.path, error=str(exc), exc_info=True
     )
     return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        status_code=500,
         content={"detail": "An internal error occurred. Please contact your administrator."},
     )
