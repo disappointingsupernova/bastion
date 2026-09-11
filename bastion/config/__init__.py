@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     # ── Anomaly detection ─────────────────────────────────────────────────────
     anomaly_score_alert_threshold: int = 70  # 0–100 heuristic score
 
+    # Dual approval — when True, privileged actions require a second admin
+    # to confirm within dual_approval_window_minutes. When only one admin
+    # exists, the initiator must re-verify with TOTP + email instead.
+    dual_approval_required: bool = False
+    dual_approval_window_minutes: int = 30
+
     # ── Package checks ────────────────────────────────────────────────────────
     package_check_interval_hours: int = 6
 

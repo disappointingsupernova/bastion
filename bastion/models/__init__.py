@@ -80,6 +80,14 @@ class MfaMethod(StrEnum):
     EMAIL = "email"
 
 
+class DualApprovalStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
+
+
 class AccessRequestStatus(StrEnum):
     PENDING = "pending"
     APPROVED = "approved"
@@ -384,4 +392,44 @@ class AccessRequest(TimestampMixin, Base):
 
     user: Mapped[User] = relationship(foreign_keys=[user_id])
     server: Mapped[Server] = relationship()
+    reviewer: Mapped[User | None] = relationship(foreign_keys=[reviewed_by_user_id])
+
+
+class DualApprovalRequest(TimestampMixin, Base):
+    """A pending privileged operation requiring a second admin to confirm.
+
+    When dual_approval_required=True in settings, actions such as granting sudo,
+    revoking a certificate, or deleting a user are held here until a second admin
+    approves within the configured window.
+
+    When only one admin exists, the initiating admin must re-authenticate with
+    TOTP + email before the action proceeds (single-admin fallback).
+    """
+
+    __tablename__ = "dual_approval_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # The admin who initiated the action
+    initiated_by_user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=False
+    )
+    # Human-readable description of the action
+    action_description: Mapped[str] = mapped_column(String(512), nullable=False)
+    # Serialised action payload (JSON) — replayed on approval
+    action_type: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    action_payload: Mapped[str] = mapped_column(Text, nullable=False)  # JSON
+    status: Mapped[DualApprovalStatus] = mapped_column(
+        String(32), default=DualApprovalStatus.PENDING, nullable=False, index=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # The second admin who approved or rejected
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    review_note: Mapped[str | None] = mapped_column(String(512))
+    # For single-admin fallback: MFA verification token
+    mfa_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    initiator: Mapped[User] = relationship(foreign_keys=[initiated_by_user_id])
     reviewer: Mapped[User | None] = relationship(foreign_keys=[reviewed_by_user_id])

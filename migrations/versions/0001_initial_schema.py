@@ -280,9 +280,37 @@ def upgrade() -> None:
         ),
     )
 
+    op.create_table(
+        "dual_approval_requests",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("initiated_by_user_id", sa.String(36), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("action_description", sa.String(512), nullable=False),
+        sa.Column("action_type", sa.String(128), nullable=False, index=True),
+        sa.Column("action_payload", sa.Text(), nullable=False),
+        sa.Column("status", sa.String(32), nullable=False, server_default="pending", index=True),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("reviewed_by_user_id", sa.String(36), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("review_note", sa.String(512), nullable=True),
+        sa.Column("mfa_verified", sa.Boolean(), nullable=False, server_default="0"),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+    )
+
 
 def downgrade() -> None:
     """Drop all Bastion tables."""
+    op.drop_table("dual_approval_requests")
     op.drop_table("access_requests")
     op.drop_table("server_packages")
     op.drop_table("system_settings")
