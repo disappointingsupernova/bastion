@@ -20,9 +20,6 @@ log.info("Celery broker configured", broker=f"redis://{_redis_url_safe}")
 app = Celery(
     "bastion",
     broker=settings.redis_url,
-    # Fix #16: task results are disabled — provisioning output, error details,
-    # and hostnames must not be stored in Redis (no encryption at rest).
-    # Tasks use audit logs for outcome tracking instead.
     backend=None,
     include=[
         "workers.tasks.alerts",
@@ -31,6 +28,7 @@ app = Celery(
         "workers.tasks.recordings",
         "workers.tasks.connectivity",
         "workers.tasks.access_requests",
+        "workers.tasks.notifications",
     ],
 )
 
@@ -68,6 +66,30 @@ app.conf.update(
         "expire-jit-access": {
             "task": "workers.tasks.access_requests.expire_jit_access",
             "schedule": crontab(minute="*/5"),
+        },
+        "check-ssh-key-age": {
+            "task": "workers.tasks.notifications.check_ssh_key_age",
+            "schedule": crontab(hour="8", minute="0"),  # Daily at 08:00 UTC
+        },
+        "notify-cert-expiry": {
+            "task": "workers.tasks.notifications.notify_cert_expiry",
+            "schedule": crontab(minute="*/15"),
+        },
+        "distribute-krl": {
+            "task": "workers.tasks.notifications.distribute_krl",
+            "schedule": crontab(minute="*/30"),
+        },
+        "backup-database": {
+            "task": "workers.tasks.notifications.backup_database",
+            "schedule": crontab(hour="2", minute="0"),  # Daily at 02:00 UTC
+        },
+        "refresh-anomaly-baselines": {
+            "task": "workers.tasks.notifications.refresh_anomaly_baselines",
+            "schedule": crontab(hour="*/6", minute="0"),
+        },
+        "node-heartbeat": {
+            "task": "workers.tasks.notifications.node_heartbeat",
+            "schedule": crontab(minute="*/1"),
         },
     },
 )

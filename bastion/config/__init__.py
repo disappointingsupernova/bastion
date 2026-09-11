@@ -104,6 +104,32 @@ class Settings(BaseSettings):
     # ── Package checks ────────────────────────────────────────────────────────
     package_check_interval_hours: int = 6
 
+    # ── SSH key rotation reminders ────────────────────────────────────────────
+    ssh_key_max_age_days: int | None = 365
+
+    # ── Certificate expiry warnings ───────────────────────────────────────────
+    cert_expiry_warn_minutes: int = 60
+
+    # ── LDAP / Active Directory ───────────────────────────────────────────────
+    ldap_url: str | None = None
+    ldap_bind_dn: str | None = None
+    ldap_bind_password: str | None = None
+    ldap_user_base_dn: str | None = None
+    ldap_user_filter: str = "(objectClass=person)"
+    ldap_username_attr: str = "sAMAccountName"
+    ldap_email_attr: str = "mail"
+    ldap_sync_interval_hours: int = 6
+
+    # ── SIEM / syslog forwarding ──────────────────────────────────────────────
+    syslog_host: str | None = None
+    syslog_port: int = 514
+    syslog_protocol: str = "udp"  # udp or tcp
+    syslog_facility: int = 16  # local0
+
+    # ── Webhook notifications ─────────────────────────────────────────────────
+    webhook_url: str | None = None
+    webhook_secret: str | None = None  # HMAC-SHA256 signing secret for webhook payloads
+
     # ── Excluded system users (cannot be bastion users) ───────────────────────
     excluded_system_users: list[str] = [
         "root",
