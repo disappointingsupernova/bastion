@@ -248,6 +248,14 @@ async def revoke_certificate(
 
     await _rebuild_krl(db)
 
+    # Queue KRL distribution to all managed servers
+    try:
+        from celery import current_app as celery_app
+        celery_app.send_task("workers.tasks.notifications.distribute_krl")
+        log.info("KRL distribution task queued after revocation", cert_id=cert_id)
+    except Exception as exc:
+        log.warning("Could not queue KRL distribution task", error=str(exc))
+
     log.info(
         "Certificate revoked",
         cert_id=cert_id,
