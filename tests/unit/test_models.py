@@ -195,16 +195,16 @@ class TestEnumerations:
         assert set(CertStatus) == {"active", "expired", "revoked"}
 
     def test_alert_channels(self):
-        """AlertChannel must contain all expected values."""
-        assert set(AlertChannel) == {"email", "ses", "slack", "pagerduty", "pushover"}
+        """AlertChannel must contain all expected values including webhook and syslog."""
+        assert set(AlertChannel) == {"email", "ses", "slack", "pagerduty", "pushover", "webhook", "syslog"}
 
     def test_alert_severities(self):
         """AlertSeverity must contain all expected values."""
         assert set(AlertSeverity) == {"info", "warning", "critical"}
 
     def test_mfa_methods(self):
-        """MfaMethod must contain all expected values."""
-        assert set(MfaMethod) == {"totp", "email"}
+        """MfaMethod must contain all expected values including fido2."""
+        assert set(MfaMethod) == {"totp", "email", "fido2"}
 
     def test_os_families(self):
         """OsFamily must contain all expected values."""

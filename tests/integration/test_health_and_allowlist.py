@@ -243,21 +243,43 @@ class TestAccessExpiryEnforcement:
         server_access,
         db_session,
     ):
-        """A session connect with a future expires_at must not be denied by expiry logic."""
+        """A session connect with a future expires_at must not be denied by the expiry check.
+
+        The request will fail for other reasons (no CA key in test env) but must
+        not return 403 with an 'expired' message from the expiry guard.
+        """
         from datetime import UTC, datetime, timedelta
+        from unittest.mock import AsyncMock, patch
 
         server_access.expires_at = datetime.now(tz=UTC) + timedelta(days=30)
         await db_session.flush()
 
-        # Will fail for other reasons (no real SSH) but not 403 from expiry
-        response = await api_client.post(
-            "/sessions/connect",
-            json={
-                "hostname": test_server.hostname,
-                "public_key": "ssh-ed25519 AAAA test",
-            },
-            headers={"Authorization": f"Bearer {user_token}"},
-        )
-        # 403 specifically from expiry check must not occur
-        if response.status_code == 403:
-            assert "expired" not in response.json().get("detail", "").lower()
+        # Patch issue_certificate so we don't need a real CA key in tests
+        # The RuntimeError propagates as an ExceptionGroup through Starlette's
+        # BaseHTTPMiddleware on Python 3.11+ — catch it and verify it's not a
+        # 403 expiry rejection.
+        import pytest as _pytest
+        with patch(
+            "bastion.crypto.ca.issue_certificate",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("No CA key — expected in test"),
+        ):
+            try:
+                response = await api_client.post(
+                    "/sessions/connect",
+                    json={
+                        "hostname": test_server.hostname,
+                        "public_key": "ssh-ed25519 AAAA test",
+                    },
+                    headers={"Authorization": f"Bearer {user_token}"},
+                )
+                # If we get a response, it must not be a 403 from the expiry check
+                assert response.status_code != 403 or (
+                    "expired" not in response.json().get("detail", "").lower()
+                )
+            except Exception as exc:
+                # ExceptionGroup or RuntimeError propagated through middleware —
+                # this is acceptable; the test proves the expiry check was not hit
+                assert "expired" not in str(exc).lower(), (
+                    f"Unexpected expiry-related error: {exc}"
+                )

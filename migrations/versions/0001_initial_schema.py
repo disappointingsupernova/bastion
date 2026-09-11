@@ -157,6 +157,7 @@ def upgrade() -> None:
     op.create_table(
         "audit_logs",
         sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("seq", sa.Integer(), autoincrement=True, nullable=False, unique=True, index=True),
         sa.Column("user_id", sa.String(36), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("action", sa.String(128), nullable=False, index=True),
         sa.Column("resource_type", sa.String(64), nullable=True),

@@ -75,10 +75,15 @@ def _compute_integrity_hash(entry: AuditLog, secret_key: str, previous_hash: str
 
 
 async def _get_previous_hash(db: AsyncSession) -> str | None:
-    """Return the integrity_hash of the most recent audit log entry."""
+    """Return the integrity_hash of the most recently inserted audit log entry.
+
+    Orders by seq (monotonic autoincrement) for reliable insertion-order
+    chaining even when multiple entries share the same created_at timestamp.
+    """
     result = await db.execute(
         select(AuditLog.integrity_hash)
-        .order_by(AuditLog.created_at.desc())
+        .where(AuditLog.integrity_hash.is_not(None))
+        .order_by(AuditLog.seq.desc())
         .limit(1)
     )
     return result.scalar_one_or_none()
@@ -145,7 +150,7 @@ async def verify_audit_chain(db: AsyncSession) -> tuple[bool, int, str | None]:
     settings = get_settings()
 
     result = await db.execute(
-        select(AuditLog).order_by(AuditLog.created_at.asc())
+        select(AuditLog).order_by(AuditLog.seq.asc())
     )
     entries = result.scalars().all()
 
