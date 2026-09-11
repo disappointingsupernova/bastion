@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     recordings_s3_bucket: str | None = None
     recordings_s3_prefix: str = "bastion/recordings/"
     recordings_age_public_key: str | None = None  # age public key for encryption
+    # Master key for deriving per-admin decrypt keys (HMAC-SHA256 derivation)
+    # Generate with: python3 -c "import secrets; print(secrets.token_hex(32))"
+    recordings_master_key: str | None = None
 
     # ── Alerting ──────────────────────────────────────────────────────────────
     smtp_host: str | None = None

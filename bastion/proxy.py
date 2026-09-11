@@ -238,6 +238,11 @@ class BastionSSHSession(asyncssh.SSHServerSession):
                 if self._recorder:
                     self._recorder.write_output(data)
                 self._chan.write(data)
+                # Publish to live monitoring channel
+                from bastion.recordings import publish_live_output
+                asyncio.create_task(
+                    publish_live_output(self._session_record.id, data.decode("utf-8", errors="replace"))
+                )
         except Exception as exc:
             log.debug(
                 "Output forwarding ended", session_id=self._session_record.id, reason=str(exc)
@@ -246,6 +251,9 @@ class BastionSSHSession(asyncssh.SSHServerSession):
             kill_task.cancel()
             exit_status = self._target_process.exit_status or 0  # type: ignore[union-attr]
             self._chan.exit(exit_status)
+            # Signal live monitoring subscribers that the session has ended
+            from bastion.recordings import publish_live_output
+            asyncio.create_task(publish_live_output(self._session_record.id, "__END__"))
             await self._finalise()
 
     def data_received(self, data: bytes, datatype: asyncssh.DataType) -> None:
