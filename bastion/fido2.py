@@ -46,7 +46,9 @@ def _load_credentials(user: User, secret_key: str) -> list[dict[str, Any]]:
     if not user.fido2_credentials:
         return []
     try:
-        result: list[dict[str, Any]] = json.loads(decrypt_secret(user.fido2_credentials, secret_key))
+        result: list[dict[str, Any]] = json.loads(
+            decrypt_secret(user.fido2_credentials, secret_key)
+        )
         return result
     except Exception:
         log.error("Failed to decrypt FIDO2 credentials", user_id=user.id)
