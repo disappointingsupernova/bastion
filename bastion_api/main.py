@@ -60,16 +60,32 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty
 async def rate_limit_headers_middleware(request: Request, call_next):
     """Inject X-RateLimit-* headers into every response.
 
-    Reads the limit state set by slowapi and exposes it so CLI tools and
-    integrations can back off gracefully rather than hitting 429s unexpectedly.
+    slowapi sets X-RateLimit-Limit and X-RateLimit-Remaining on the response
+    object itself when a limit is hit. For non-limited responses we read the
+    configured default limit and compute remaining from the limiter's storage
+    so that clients can back off gracefully before hitting a 429.
     """
     response = await call_next(request)
-    # slowapi stores limit info in request.state after processing
-    limit_info = getattr(request.state, "view_rate_limit", None)
-    if limit_info:
-        response.headers["X-RateLimit-Limit"] = str(limit_info.limit.amount)
-        response.headers["X-RateLimit-Remaining"] = str(max(0, limit_info.limit.amount - limit_info.current_count))
-        response.headers["X-RateLimit-Reset"] = str(int(limit_info.reset_time))
+
+    # slowapi already injects these on 429 responses; propagate them on all
+    # responses so clients always know their current standing.
+    if "X-RateLimit-Limit" not in response.headers:
+        try:
+            # Derive the limit amount from the default_limits configuration
+            limit_str = limiter.default_limits[0] if limiter.default_limits else None
+            if limit_str:
+                # Parse "200/minute" → amount=200
+                amount = int(str(limit_str).split("/")[0])
+                key = get_remote_address(request)
+                # Ask the storage backend how many hits exist for this key
+                storage = limiter._storage  # type: ignore[attr-defined]
+                current = storage.get(f"LIMITER/{key}/{limit_str}") or 0
+                remaining = max(0, amount - int(current))
+                response.headers["X-RateLimit-Limit"] = str(amount)
+                response.headers["X-RateLimit-Remaining"] = str(remaining)
+        except Exception:
+            pass
+
     return response
 
 # CORS is intentionally restrictive — this API is Unix-socket only
