@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bastion.audit import audit
-from bastion.crypto.ca import revoke_certificate
+from bastion.crypto.ca import issue_host_certificate, revoke_certificate
 from bastion.db import get_db
 from bastion.logging import get_logger
 from bastion.models import CertStatus, SshCertificate, User, UserRole
@@ -42,6 +42,51 @@ class CertSummary(BaseModel):
 
 class RevokeRequest(BaseModel):
     reason: str
+
+
+class HostCertRequest(BaseModel):
+    hostname: str
+    host_public_key: str  # OpenSSH format host public key
+    validity_hours: int | None = None
+
+
+class HostCertResponse(BaseModel):
+    certificate: str
+    hostname: str
+
+
+@router.post("/host", response_model=HostCertResponse)
+async def issue_host_cert(
+    body: HostCertRequest,
+    current_user: Annotated[User, Depends(_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> HostCertResponse:
+    """Issue an SSH host certificate for a managed server.
+
+    Host certificates allow servers to prove their identity using the Bastion CA,
+    eliminating the known_hosts problem on first connect.
+    The certificate is returned in the response and never written to disk.
+    """
+    try:
+        cert_bytes = await issue_host_certificate(
+            db=db,
+            server_hostname=body.hostname,
+            host_public_key_bytes=body.host_public_key.encode(),
+            validity_hours=body.validity_hours,
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    await audit(
+        db,
+        "admin.cert.host.issue",
+        success=True,
+        user_id=current_user.id,
+        resource_type="server",
+        detail={"hostname": body.hostname},
+    )
+    log.info("Host certificate issued", hostname=body.hostname, issued_by=current_user.username)
+    return HostCertResponse(certificate=cert_bytes.decode(), hostname=body.hostname)
 
 
 @router.get("/", response_model=list[CertSummary])

@@ -257,6 +257,69 @@ async def revoke_certificate(
     )
 
 
+async def issue_host_certificate(
+    db: AsyncSession,
+    server_hostname: str,
+    host_public_key_bytes: bytes,
+    validity_hours: int | None = None,
+) -> bytes:
+    """Issue a signed SSH host certificate for a managed server.
+
+    Host certificates allow remote servers to prove their identity to clients
+    using the Bastion CA, eliminating the known_hosts problem on first connect.
+    Returns the raw certificate bytes — never written to disk on the bastion.
+    """
+    import subprocess
+    import tempfile
+
+    _validate_public_key(host_public_key_bytes)
+
+    settings = get_settings()
+    hours = validity_hours or (settings.ssh_cert_validity_hours * 24)  # default 8 days for hosts
+    serial = await _next_serial(db)
+
+    # key_id is built from serial only — no user input
+    key_id = f"bastion-host-{serial}"
+    # Principals for a host cert are the hostnames/IPs the cert is valid for
+    principal = server_hostname
+    if not _PRINCIPAL_RE.match(principal.replace(".", "").replace("-", "")):
+        # Hostnames may contain dots — use a relaxed check for host certs
+        if not all(c.isalnum() or c in ".-_" for c in principal):
+            raise ValueError(f"Invalid hostname {principal!r} for host certificate")
+
+    with tempfile.TemporaryDirectory(prefix="bastion-hostcert-") as tmpdir:
+        tmp = Path(tmpdir)
+        pub_key_file = tmp / "host.pub"
+        pub_key_file.write_bytes(host_public_key_bytes)
+        pub_key_file.chmod(0o600)
+
+        result = subprocess.run(
+            [
+                "ssh-keygen",
+                "-s", str(settings.ca_key_path),
+                "-I", key_id,
+                "-h",  # host certificate flag
+                "-n", principal,
+                "-V", f"+{hours}h",
+                "-z", str(serial),
+                str(pub_key_file),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        if result.returncode != 0:
+            log.error("Host certificate issuance failed", hostname=server_hostname, stderr=result.stderr)
+            raise RuntimeError(f"ssh-keygen failed: {result.stderr}")
+
+        cert_file = pub_key_file.with_name("host-cert.pub")
+        cert_bytes = cert_file.read_bytes()
+
+    log.info("SSH host certificate issued", hostname=server_hostname, serial=serial, key_id=key_id)
+    return cert_bytes
+
+
 async def _rebuild_krl(db: AsyncSession) -> None:
     """Rebuild the KRL file from all revoked certificates in the database."""
     import subprocess
