@@ -1,4 +1,4 @@
-"""Admin audit log router — query the immutable audit trail."""
+"""Admin audit log router — query the immutable audit trail and verify integrity."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bastion.audit import verify_audit_chain
 from bastion.db import get_db
 from bastion.models import AuditLog, User, UserRole
 from bastion_api.deps import require_role
@@ -28,9 +29,16 @@ class AuditLogEntry(BaseModel):
     detail: str | None
     ip_address: str | None
     success: bool
+    integrity_hash: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ChainVerifyResponse(BaseModel):
+    valid: bool
+    entries_checked: int
+    first_broken_entry_id: str | None
 
 
 @router.get("/", response_model=list[AuditLogEntry])
@@ -56,3 +64,21 @@ async def list_audit_logs(
     query = query.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     return [AuditLogEntry.model_validate(e) for e in result.scalars().all()]
+
+
+@router.get("/verify-chain", response_model=ChainVerifyResponse)
+async def verify_chain(
+    current_user: Annotated[User, Depends(_auditor_or_above)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ChainVerifyResponse:
+    """Verify the HMAC integrity chain of the entire audit log.
+
+    A broken chain indicates that one or more entries have been tampered with.
+    Returns the position of the first broken entry if tampering is detected.
+    """
+    valid, entries_checked, first_broken = await verify_audit_chain(db)
+    return ChainVerifyResponse(
+        valid=valid,
+        entries_checked=entries_checked,
+        first_broken_entry_id=first_broken,
+    )

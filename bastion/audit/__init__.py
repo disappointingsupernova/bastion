@@ -1,10 +1,18 @@
-"""Audit logging — every action in the system is recorded here before and after execution."""
+"""Audit logging — every action in the system is recorded here before and after execution.
+
+Each entry is signed with an HMAC-SHA256 that chains to the previous entry's hash,
+forming a tamper-evident append-only log. Any modification to a past entry will
+break the chain from that point forward, making tampering detectable.
+"""
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bastion.logging import get_logger
@@ -12,22 +20,12 @@ from bastion.models import AuditLog
 
 log = get_logger(__name__)
 
-# Maximum length of the serialised detail JSON stored in the database
 _MAX_DETAIL_BYTES = 4096
-# Maximum length of any individual string value within the detail dict
 _MAX_VALUE_LEN = 512
 
 
 def _sanitise_detail(detail: dict[str, Any]) -> dict[str, Any]:
-    """Sanitise an audit detail dict before storage.
-
-    - Truncates individual string values to _MAX_VALUE_LEN characters
-    - Removes keys whose values are not JSON-serialisable primitives
-    - Truncates the entire serialised payload to _MAX_DETAIL_BYTES
-
-    This prevents oversized or misleading data from being embedded in the
-    audit log (fix #18).
-    """
+    """Sanitise an audit detail dict before storage."""
     safe: dict[str, Any] = {}
     for k, v in detail.items():
         if isinstance(v, str):
@@ -35,7 +33,6 @@ def _sanitise_detail(detail: dict[str, Any]) -> dict[str, Any]:
         elif isinstance(v, (int, float, bool)) or v is None:
             safe[k] = v
         elif isinstance(v, (list, dict)):
-            # Serialise nested structures but cap their string representation
             try:
                 serialised = json.dumps(v)
                 safe[k] = json.loads(serialised[:_MAX_VALUE_LEN])
@@ -44,12 +41,47 @@ def _sanitise_detail(detail: dict[str, Any]) -> dict[str, Any]:
         else:
             safe[k] = "<non-serialisable>"
 
-    # Final cap on the entire payload
     payload = json.dumps(safe)
     if len(payload) > _MAX_DETAIL_BYTES:
         safe = {"_truncated": True, "_original_keys": list(safe.keys())}
 
     return safe
+
+
+def _compute_integrity_hash(entry: AuditLog, secret_key: str, previous_hash: str | None) -> str:
+    """Compute an HMAC-SHA256 integrity hash for an audit log entry.
+
+    The hash covers all immutable fields plus the previous entry's hash,
+    forming a chain. Keyed with the application SECRET_KEY so the chain
+    cannot be forged without access to the key.
+    """
+    chain_input = "|".join([
+        entry.id,
+        entry.action,
+        str(entry.user_id or ""),
+        str(entry.resource_type or ""),
+        str(entry.resource_id or ""),
+        str(entry.detail or ""),
+        str(entry.ip_address or ""),
+        str(entry.success),
+        str(entry.node_id or ""),
+        previous_hash or "GENESIS",
+    ])
+    return hmac.new(
+        secret_key.encode(),
+        chain_input.encode(),
+        digestmod="sha256",
+    ).hexdigest()
+
+
+async def _get_previous_hash(db: AsyncSession) -> str | None:
+    """Return the integrity_hash of the most recent audit log entry."""
+    result = await db.execute(
+        select(AuditLog.integrity_hash)
+        .order_by(AuditLog.created_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def audit(
@@ -63,12 +95,13 @@ async def audit(
     ip_address: str | None = None,
     node_id: str | None = None,
 ) -> AuditLog:
-    """Write an audit log entry to the database.
+    """Write an audit log entry with an HMAC integrity hash chained to the previous entry.
 
-    This must be called for every action — both on initiation and on completion.
-    The detail dict is sanitised before storage to prevent oversized or
-    misleading data from being embedded (fix #18).
+    Must be called for every action — both on initiation and on completion.
     """
+    from bastion.config import get_settings
+
+    settings = get_settings()
     sanitised = _sanitise_detail(detail) if detail else None
 
     entry = AuditLog(
@@ -84,6 +117,11 @@ async def audit(
     db.add(entry)
     await db.flush()
 
+    # Compute and store the integrity hash after flush (so entry.id is assigned)
+    previous_hash = await _get_previous_hash(db)
+    entry.integrity_hash = _compute_integrity_hash(entry, settings.secret_key, previous_hash)
+    await db.flush()
+
     log.info(
         "Audit event recorded",
         action=action,
@@ -94,3 +132,36 @@ async def audit(
         ip=ip_address,
     )
     return entry
+
+
+async def verify_audit_chain(db: AsyncSession) -> tuple[bool, int, str | None]:
+    """Verify the integrity of the entire audit log chain.
+
+    Returns (is_valid, entries_checked, first_broken_entry_id).
+    A broken chain indicates tampering from that entry onwards.
+    """
+    from bastion.config import get_settings
+
+    settings = get_settings()
+
+    result = await db.execute(
+        select(AuditLog).order_by(AuditLog.created_at.asc())
+    )
+    entries = result.scalars().all()
+
+    previous_hash: str | None = None
+    for i, entry in enumerate(entries):
+        expected = _compute_integrity_hash(entry, settings.secret_key, previous_hash)
+        if entry.integrity_hash != expected:
+            log.error(
+                "Audit log integrity chain broken",
+                entry_id=entry.id,
+                position=i,
+                expected=expected,
+                stored=entry.integrity_hash,
+            )
+            return False, i, entry.id
+        previous_hash = entry.integrity_hash
+
+    log.info("Audit log integrity chain verified", entries_checked=len(entries))
+    return True, len(entries), None
