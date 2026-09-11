@@ -39,6 +39,9 @@ class OnboardServerRequest(BaseModel):
     tags: list[str] | None = None
     notes: str | None = None
     proxy_jump_hostname: str | None = None
+    environment: str | None = None
+    ip_allowlist: list[str] | None = None
+    session_policy: dict | None = None
 
 
 class ServerResponse(BaseModel):
@@ -59,6 +62,7 @@ class GrantAccessRequest(BaseModel):
     user_id: str
     allow_sudo: bool = False
     remote_username: str | None = None
+    expires_at: datetime | None = None  # Optional expiry for time-limited access grants
 
 
 class PackageUpdateRequest(BaseModel):
@@ -107,6 +111,9 @@ async def onboard_server(
         tags=json.dumps(body.tags or []),
         notes=body.notes,
         proxy_jump_server_id=proxy_jump_id,
+        environment=body.environment,
+        ip_allowlist=json.dumps(body.ip_allowlist) if body.ip_allowlist is not None else None,
+        session_policy=json.dumps(body.session_policy) if body.session_policy is not None else None,
     )
     db.add(server)
     await db.flush()
@@ -169,6 +176,7 @@ async def grant_access(
         server_id=server_id,
         allow_sudo=body.allow_sudo,
         remote_username=body.remote_username,
+        expires_at=body.expires_at,
     )
     db.add(access)
     await db.flush()

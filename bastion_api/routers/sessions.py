@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bastion.audit import audit
 from bastion.config import get_settings
 from bastion.db import get_db
+from bastion.ip_allowlist import check_ip_allowed
 from bastion.logging import get_logger
 from bastion.models import (
     Server,
@@ -99,6 +100,22 @@ async def connect(
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Access to this server is not permitted."
+        )
+
+    # ── Access expiry check ───────────────────────────────────────────────────
+    if access.expires_at and access.expires_at < datetime.now(tz=UTC):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your access grant to this server has expired.",
+        )
+
+    # ── Server IP allowlist check ─────────────────────────────────────────────
+    from bastion_api.deps import get_client_ip
+    # source_ip is recorded on the session; check server allowlist
+    if not check_ip_allowed("unix-socket", server.ip_allowlist):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your source address is not permitted to connect to this server.",
         )
 
     # Issue certificate

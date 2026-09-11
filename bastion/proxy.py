@@ -18,6 +18,43 @@ from bastion.models import Server, Session, SessionStatus, User
 log = get_logger(__name__)
 
 
+# ── Session policy enforcement ────────────────────────────────────────────────
+
+
+def _check_session_policy(policy_json: str | None, command: str | None) -> None:
+    """Enforce privileged session controls defined in the server's session_policy.
+
+    Raises PermissionError if the requested operation is blocked by policy.
+    Policy is a JSON object with optional keys:
+      - block_scp: bool — block scp/sftp subsystem and scp commands
+      - block_port_forwarding: bool — block TCP forwarding requests
+      - allowed_commands: list[str] — if set, only these exact commands are permitted
+    """
+    if not policy_json:
+        return
+    try:
+        policy: dict = json.loads(policy_json)
+    except (ValueError, TypeError):
+        log.warning("Invalid session_policy JSON — ignoring", policy=policy_json)
+        return
+
+    if command:
+        # Block scp/sftp
+        if policy.get("block_scp") and (
+            command.startswith("scp ") or command.startswith("sftp-server")
+            or "sftp" in command
+        ):
+            raise PermissionError("scp/sftp is not permitted on this server.")
+
+        # Restrict to allowed commands
+        allowed = policy.get("allowed_commands")
+        if allowed is not None and command not in allowed:
+            raise PermissionError(
+                f"Command not permitted by server policy. Allowed: {allowed}"
+            )
+
+
+
 def _make_known_hosts(ca_pub_key_path: Path) -> asyncssh.SSHKnownHosts:
     """Return an asyncssh known-hosts object that trusts the Bastion CA for all hosts.
 
@@ -78,10 +115,12 @@ class BastionSSHSession(asyncssh.SSHServerSession):
         session_record: Session,
         target_conn: asyncssh.SSHClientConnection,
         recorder: AsciinemaRecorder | None,
+        session_policy: str | None = None,
     ) -> None:
         self._session_record = session_record
         self._target_conn = target_conn
         self._recorder = recorder
+        self._session_policy = session_policy
         self._target_process: asyncssh.SSHClientProcess | None = None
         self._bytes_sent = 0
         self._bytes_received = 0
@@ -95,8 +134,50 @@ class BastionSSHSession(asyncssh.SSHServerSession):
         return True
 
     def exec_requested(self, command: str) -> bool:
-        """Accept exec requests."""
+        """Accept exec requests, enforcing session policy."""
+        try:
+            _check_session_policy(self._session_policy, command)
+        except PermissionError as exc:
+            log.warning(
+                "Exec request blocked by session policy",
+                session_id=self._session_record.id,
+                command=command,
+                reason=str(exc),
+            )
+            return False
         self._command = command
+        return True
+
+    def subsystem_requested(self, subsystem: str) -> bool:
+        """Block sftp subsystem if session policy requires it."""
+        try:
+            _check_session_policy(self._session_policy, f"sftp-server" if subsystem == "sftp" else subsystem)
+        except PermissionError as exc:
+            log.warning(
+                "Subsystem request blocked by session policy",
+                session_id=self._session_record.id,
+                subsystem=subsystem,
+                reason=str(exc),
+            )
+            return False
+        return True
+
+    def port_forwarding_requested(
+        self, dest_host: str, dest_port: int, orig_host: str, orig_port: int
+    ) -> bool:
+        """Block port forwarding if session policy requires it."""
+        if self._session_policy:
+            try:
+                policy: dict = json.loads(self._session_policy)
+                if policy.get("block_port_forwarding"):
+                    log.warning(
+                        "Port forwarding blocked by session policy",
+                        session_id=self._session_record.id,
+                        dest=f"{dest_host}:{dest_port}",
+                    )
+                    return False
+            except (ValueError, TypeError):
+                pass
         return True
 
     def pty_requested(  # type: ignore[override]
