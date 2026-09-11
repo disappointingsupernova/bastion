@@ -10,9 +10,7 @@ from httpx import AsyncClient
 class TestUserAccessRequests:
     """Tests for the user-facing /access-requests endpoints."""
 
-    async def test_jit_disabled_user_cannot_submit(
-        self, api_client: AsyncClient, user_token: str
-    ):
+    async def test_jit_disabled_user_cannot_submit(self, api_client: AsyncClient, user_token: str):
         """A user without jit_access_enabled must receive 403."""
         response = await api_client.post(
             "/access-requests/",
@@ -141,9 +139,7 @@ class TestUserAccessRequests:
         )
         assert response.status_code == 422
 
-    async def test_list_my_requests_empty(
-        self, api_client: AsyncClient, user_token: str
-    ):
+    async def test_list_my_requests_empty(self, api_client: AsyncClient, user_token: str):
         """A user with no requests must receive an empty list."""
         response = await api_client.get(
             "/access-requests/",
@@ -205,9 +201,7 @@ class TestUserAccessRequests:
         )
         request_id = create_resp.json()["id"]
 
-        response = await api_client.delete(
-            f"/access-requests/{request_id}", headers=headers
-        )
+        response = await api_client.delete(f"/access-requests/{request_id}", headers=headers)
         assert response.status_code == 204
 
     async def test_withdraw_nonexistent_request_returns_404(
@@ -313,9 +307,7 @@ class TestAdminAccessRequestReview:
         )
         assert response.status_code == 404
 
-    async def test_non_admin_cannot_review(
-        self, admin_client: AsyncClient, user_token: str
-    ):
+    async def test_non_admin_cannot_review(self, admin_client: AsyncClient, user_token: str):
         """A non-admin must receive 403 when attempting to review a request."""
         response = await admin_client.post(
             "/access-requests/some-id/review",

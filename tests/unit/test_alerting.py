@@ -191,7 +191,6 @@ class TestChannelSkipLogic:
 
     async def test_syslog_sends_udp_message(self):
         """_send_syslog must send a UDP datagram when protocol is udp."""
-        import socket as _socket
 
         with patch("bastion.alerting.get_settings") as mock_settings:
             mock_settings.return_value.syslog_host = "siem.example.com"

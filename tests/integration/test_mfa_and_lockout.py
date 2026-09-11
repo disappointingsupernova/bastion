@@ -101,9 +101,8 @@ class TestMfaLoginFlow:
         """A user with TOTP MFA enabled must complete the two-step login flow."""
         import pyotp
 
-        from bastion.auth import hash_password
         from bastion.config import get_settings
-        from bastion.crypto.encryption import decrypt_secret, encrypt_secret
+        from bastion.crypto.encryption import encrypt_secret
         from bastion.models import MfaMethod
 
         settings = get_settings()
@@ -238,9 +237,7 @@ class TestAccountLockout:
         )
         assert response.status_code == 429
 
-    async def test_failed_count_increments(
-        self, api_client: AsyncClient, regular_user, db_session
-    ):
+    async def test_failed_count_increments(self, api_client: AsyncClient, regular_user, db_session):
         """Each failed login must increment failed_login_count."""
         await api_client.post(
             "/auth/login",
@@ -269,9 +266,7 @@ class TestAccountLockout:
 class TestDualApprovalAdminEndpoints:
     """Tests for the admin dual-approval router."""
 
-    async def test_admin_can_list_dual_approvals(
-        self, admin_client: AsyncClient, admin_token: str
-    ):
+    async def test_admin_can_list_dual_approvals(self, admin_client: AsyncClient, admin_token: str):
         """An admin must be able to list dual-approval requests."""
         response = await admin_client.get(
             "/dual-approvals/",
