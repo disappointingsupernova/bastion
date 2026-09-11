@@ -26,6 +26,7 @@ from bastion.auth import (
 from bastion.config import get_settings
 from bastion.crypto.ca import issue_certificate
 from bastion.db import get_db
+from bastion.ip_allowlist import check_ip_allowed
 from bastion.logging import get_logger
 from bastion.models import MfaMethod, User, UserStatus
 from bastion_api.deps import get_client_ip, get_current_user
@@ -81,6 +82,23 @@ class TotpVerifyRequest(BaseModel):
     code: str
 
 
+class Fido2RegisterBeginResponse(BaseModel):
+    options: dict  # PublicKeyCredentialCreationOptions as JSON
+
+
+class Fido2RegisterCompleteRequest(BaseModel):
+    credential: dict  # AuthenticatorAttestationResponse as JSON
+
+
+class Fido2AuthBeginResponse(BaseModel):
+    options: dict  # PublicKeyCredentialRequestOptions as JSON
+
+
+class Fido2AuthCompleteRequest(BaseModel):
+    mfa_token: str
+    credential: dict  # AuthenticatorAssertionResponse as JSON
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 
@@ -90,11 +108,12 @@ async def login(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    """Authenticate with username and password — rate limited to 10/minute per IP (fix #11).
+    """Authenticate with username and password — rate limited to 10/minute per IP.
 
     If MFA is enabled, returns a short-lived mfa_token instead of a full access token.
     The mfa_token must be exchanged via /auth/mfa/verify.
     Accounts are locked for 15 minutes after 10 consecutive failed attempts.
+    IP allowlist is enforced before credentials are checked.
     """
     ip = get_client_ip(request)
     settings = get_settings()
@@ -107,7 +126,22 @@ async def login(
     )
     user = result.scalar_one_or_none()
 
-    # ── Account lockout check (fix #6) ────────────────────────────────────────
+    # ── IP allowlist check ────────────────────────────────────────────────────
+    if user and not check_ip_allowed(ip, user.ip_allowlist):
+        await audit(
+            db,
+            "auth.login",
+            success=False,
+            user_id=user.id,
+            ip_address=ip,
+            detail={"reason": "IP not in allowlist"},
+        )
+        # Return the same error as invalid credentials to avoid user enumeration
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials."
+        )
+
+    # ── Account lockout check ─────────────────────────────────────────────────
     if user and user.locked_until and user.locked_until > datetime.now(tz=UTC):
         await audit(
             db,
@@ -191,9 +225,10 @@ async def verify_mfa(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenResponse:
-    """Verify an MFA code — rate limited to 10/minute per IP (fix #11).
+    """Verify an MFA code — rate limited to 10/minute per IP.
 
-    Checks user status and deleted_at before issuing tokens (fix #7).
+    Checks user status and deleted_at before issuing tokens.
+    Supports TOTP, email, and FIDO2 methods.
     """
     ip = get_client_ip(request)
     settings = get_settings()
@@ -212,7 +247,6 @@ async def verify_mfa(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired MFA token."
         ) from None
 
-    # ── Fix #7: check status and deleted_at before issuing tokens ─────────────
     result = await db.execute(
         select(User).where(
             User.id == user_id,
@@ -242,6 +276,12 @@ async def verify_mfa(
         valid = verify_totp(secret, body.code)
     elif user.mfa_method == MfaMethod.EMAIL:
         valid = await verify_email_mfa_code(db, user.id, body.code)
+    elif user.mfa_method == MfaMethod.FIDO2:
+        # FIDO2 uses a separate flow — this endpoint is for TOTP/email only
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="FIDO2 authentication uses /auth/fido2/authenticate/complete.",
+        )
 
     if not valid:
         await audit(db, "auth.mfa.verify", success=False, user_id=user.id, ip_address=ip)
@@ -259,10 +299,7 @@ async def refresh_token(
     body: RefreshRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenResponse:
-    """Exchange a refresh token — rate limited to 20/minute per IP (fix #11).
-
-    Checks both status and deleted_at (fix #8).
-    """
+    """Exchange a refresh token for a new access token."""
     try:
         payload = decode_token(body.refresh_token)
         if payload.get("type") != "refresh":
@@ -273,7 +310,6 @@ async def refresh_token(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token."
         ) from None
 
-    # ── Fix #8: filter on both status and deleted_at ───────────────────────────
     result = await db.execute(
         select(User).where(
             User.id == user_id,
@@ -304,7 +340,6 @@ async def issue_cert(
 
     The certificate is valid for the configured number of hours (default 8).
     It is returned in the response and never written to disk.
-    Public key format is validated inside issue_certificate (fix #20).
     """
     from bastion.anomaly import evaluate_cert_issuance
 
@@ -348,15 +383,13 @@ async def setup_totp(
     """Generate a new TOTP secret for the authenticated user.
 
     The secret is stored encrypted but mfa_enabled is NOT set until the user
-    verifies a code via /auth/totp/verify (fix #13).
+    verifies a code via /auth/totp/verify.
     """
-    from bastion.config import get_settings
     from bastion.crypto.encryption import encrypt_secret
 
     settings = get_settings()
     secret = generate_totp_secret()
     current_user.totp_secret = encrypt_secret(secret, settings.secret_key)
-    # Store the method as pending — mfa_enabled remains False until verified
     current_user.mfa_method = MfaMethod.TOTP
     await db.flush()
 
@@ -370,12 +403,11 @@ async def verify_totp_setup(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Verify a TOTP code to activate MFA on the account (fix #13).
+    """Verify a TOTP code to activate MFA on the account.
 
     The user must call this after /auth/totp/setup to confirm they have
     successfully scanned the QR code. Only then is mfa_enabled set to True.
     """
-    from bastion.config import get_settings
     from bastion.crypto.encryption import decrypt_secret
 
     settings = get_settings()
@@ -398,3 +430,89 @@ async def verify_totp_setup(
     await db.flush()
     await audit(db, "auth.totp.verify", success=True, user_id=current_user.id)
     log.info("TOTP MFA activated", user_id=current_user.id)
+
+
+# ── FIDO2 / WebAuthn ──────────────────────────────────────────────────────────
+
+
+@router.post("/fido2/register/begin", response_model=Fido2RegisterBeginResponse)
+async def fido2_register_begin(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Fido2RegisterBeginResponse:
+    """Begin FIDO2 credential registration — returns PublicKeyCredentialCreationOptions."""
+    from bastion.fido2 import begin_registration
+
+    options = begin_registration(current_user.id, current_user.username)
+    return Fido2RegisterBeginResponse(options=options)
+
+
+@router.post("/fido2/register/complete", status_code=status.HTTP_204_NO_CONTENT)
+async def fido2_register_complete(
+    body: Fido2RegisterCompleteRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Complete FIDO2 credential registration and store the credential."""
+    from bastion.fido2 import complete_registration
+
+    settings = get_settings()
+    await complete_registration(db, current_user, body.credential, settings.secret_key)
+    await audit(db, "auth.fido2.register", success=True, user_id=current_user.id)
+    log.info("FIDO2 credential registered", user_id=current_user.id)
+
+
+@router.post("/fido2/authenticate/begin", response_model=Fido2AuthBeginResponse)
+async def fido2_authenticate_begin(
+    body: LoginRequest,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Fido2AuthBeginResponse:
+    """Begin FIDO2 authentication — returns PublicKeyCredentialRequestOptions.
+
+    Called after password verification succeeds and the user has FIDO2 MFA enabled.
+    Returns a challenge and a short-lived state token.
+    """
+    from bastion.fido2 import begin_authentication
+
+    ip = get_client_ip(request)
+    result = await db.execute(
+        select(User).where(
+            User.username == body.username,
+            User.status == UserStatus.ACTIVE,
+            User.deleted_at.is_(None),
+        )
+    )
+    user = result.scalar_one_or_none()
+    if user is None or not verify_password(body.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials."
+        )
+
+    if not check_ip_allowed(ip, user.ip_allowlist):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials."
+        )
+
+    settings = get_settings()
+    options, state_token = await begin_authentication(db, user, settings.secret_key)
+    return Fido2AuthBeginResponse(options={"challenge_options": options, "state_token": state_token})
+
+
+@router.post("/fido2/authenticate/complete", response_model=TokenResponse)
+async def fido2_authenticate_complete(
+    body: Fido2AuthCompleteRequest,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TokenResponse:
+    """Complete FIDO2 authentication and issue tokens."""
+    from bastion.fido2 import complete_authentication
+
+    ip = get_client_ip(request)
+    settings = get_settings()
+
+    user = await complete_authentication(db, body.mfa_token, body.credential, settings.secret_key)
+    await audit(db, "auth.fido2.authenticate", success=True, user_id=user.id, ip_address=ip)
+    return TokenResponse(
+        access_token=create_access_token(user.id, user.username, user.role.value),
+        refresh_token=create_refresh_token(user.id),
+    )

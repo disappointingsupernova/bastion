@@ -30,15 +30,18 @@ def upgrade() -> None:
         sa.Column("status", sa.String(32), nullable=False),
         sa.Column("mfa_method", sa.String(16), nullable=True),
         sa.Column("totp_secret", sa.String(255), nullable=True),
+        sa.Column("fido2_credentials", sa.Text(), nullable=True),
         sa.Column("mfa_enabled", sa.Boolean(), nullable=False, server_default="0"),
         sa.Column("unix_uid", sa.Integer(), nullable=True),
         sa.Column("ssh_public_key", sa.Text(), nullable=True),
+        sa.Column("ssh_public_key_updated_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_login_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_login_ip", sa.String(45), nullable=True),
         sa.Column("failed_login_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("locked_until", sa.DateTime(timezone=True), nullable=True),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("jit_access_enabled", sa.Boolean(), nullable=False, server_default="0"),
+        sa.Column("ip_allowlist", sa.Text(), nullable=True),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
         ),
@@ -58,6 +61,7 @@ def upgrade() -> None:
         sa.Column("os_version", sa.String(128), nullable=True),
         sa.Column("status", sa.String(32), nullable=False, server_default="active"),
         sa.Column("tags", sa.Text(), nullable=True),
+        sa.Column("environment", sa.String(64), nullable=True),
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_check_at", sa.DateTime(timezone=True), nullable=True),
@@ -66,6 +70,8 @@ def upgrade() -> None:
         ),
         sa.Column("hardening_applied", sa.Boolean(), nullable=False, server_default="0"),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("ip_allowlist", sa.Text(), nullable=True),
+        sa.Column("session_policy", sa.Text(), nullable=True),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
         ),
@@ -84,6 +90,7 @@ def upgrade() -> None:
         sa.Column("provisioned", sa.Boolean(), nullable=False, server_default="0"),
         sa.Column("provisioned_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
         ),
@@ -158,6 +165,7 @@ def upgrade() -> None:
         sa.Column("ip_address", sa.String(45), nullable=True),
         sa.Column("success", sa.Boolean(), nullable=False),
         sa.Column("node_id", sa.String(64), nullable=True),
+        sa.Column("integrity_hash", sa.String(64), nullable=True),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
         ),
@@ -307,9 +315,118 @@ def upgrade() -> None:
         ),
     )
 
+    op.create_table(
+        "user_groups",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("name", sa.String(128), nullable=False, unique=True, index=True),
+        sa.Column("description", sa.String(512), nullable=True),
+        sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+    )
+
+    op.create_table(
+        "user_group_memberships",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("user_id", sa.String(36), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("group_id", sa.String(36), sa.ForeignKey("user_groups.id"), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.UniqueConstraint("user_id", "group_id"),
+    )
+
+    op.create_table(
+        "group_server_access",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("group_id", sa.String(36), sa.ForeignKey("user_groups.id"), nullable=False),
+        sa.Column("server_id", sa.String(36), sa.ForeignKey("servers.id"), nullable=False),
+        sa.Column("allow_sudo", sa.Boolean(), nullable=False, server_default="0"),
+        sa.Column("remote_username", sa.String(64), nullable=True),
+        sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.UniqueConstraint("group_id", "server_id"),
+    )
+
+    op.create_table(
+        "anomaly_baselines",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column(
+            "user_id",
+            sa.String(36),
+            sa.ForeignKey("users.id"),
+            nullable=False,
+            unique=True,
+            index=True,
+        ),
+        sa.Column("typical_hours", sa.Text(), nullable=True),
+        sa.Column("known_ips", sa.Text(), nullable=True),
+        sa.Column("avg_session_duration_seconds", sa.Float(), nullable=True),
+        sa.Column("avg_session_bytes", sa.Float(), nullable=True),
+        sa.Column("sample_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("last_updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+    )
+
+    op.create_table(
+        "recording_decrypt_logs",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column(
+            "session_id", sa.String(36), sa.ForeignKey("sessions.id"), nullable=False, index=True
+        ),
+        sa.Column(
+            "admin_user_id", sa.String(36), sa.ForeignKey("users.id"), nullable=False, index=True
+        ),
+        sa.Column("key_fingerprint", sa.String(64), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+    )
+
+    op.create_table(
+        "bastion_nodes",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("node_id", sa.String(64), nullable=False, unique=True, index=True),
+        sa.Column("version", sa.String(64), nullable=True),
+        sa.Column("last_heartbeat_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("load_metrics", sa.Text(), nullable=True),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+    )
+
 
 def downgrade() -> None:
     """Drop all Bastion tables."""
+    op.drop_table("bastion_nodes")
+    op.drop_table("recording_decrypt_logs")
+    op.drop_table("anomaly_baselines")
+    op.drop_table("group_server_access")
+    op.drop_table("user_group_memberships")
+    op.drop_table("user_groups")
     op.drop_table("dual_approval_requests")
     op.drop_table("access_requests")
     op.drop_table("server_packages")

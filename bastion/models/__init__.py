@@ -67,6 +67,8 @@ class AlertChannel(StrEnum):
     SLACK = "slack"
     PAGERDUTY = "pagerduty"
     PUSHOVER = "pushover"
+    WEBHOOK = "webhook"
+    SYSLOG = "syslog"
 
 
 class AlertSeverity(StrEnum):
@@ -78,6 +80,7 @@ class AlertSeverity(StrEnum):
 class MfaMethod(StrEnum):
     TOTP = "totp"
     EMAIL = "email"
+    FIDO2 = "fido2"
 
 
 class DualApprovalStatus(StrEnum):
@@ -135,9 +138,11 @@ class User(TimestampMixin, Base):
     )
     mfa_method: Mapped[MfaMethod | None] = mapped_column(String(16))
     totp_secret: Mapped[str | None] = mapped_column(String(255))  # Encrypted at rest
+    fido2_credentials: Mapped[str | None] = mapped_column(Text)  # JSON list of FIDO2 credential dicts, encrypted
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     unix_uid: Mapped[int | None] = mapped_column(Integer)
     ssh_public_key: Mapped[str | None] = mapped_column(Text)
+    ssh_public_key_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_ip: Mapped[str | None] = mapped_column(String(45))
     failed_login_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -145,6 +150,8 @@ class User(TimestampMixin, Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # When True, this user may submit just-in-time access requests
     jit_access_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # JSON array of CIDR strings — if non-null, logins are restricted to these ranges
+    ip_allowlist: Mapped[str | None] = mapped_column(Text)
 
     certificates: Mapped[list[SshCertificate]] = relationship(back_populates="user")
     sessions: Mapped[list[Session]] = relationship(back_populates="user")
@@ -171,6 +178,7 @@ class Server(TimestampMixin, Base):
         String(32), default=ServerStatus.ACTIVE, nullable=False
     )
     tags: Mapped[str | None] = mapped_column(Text)  # JSON array of tag strings
+    environment: Mapped[str | None] = mapped_column(String(64))  # e.g. production, staging, dev
     notes: Mapped[str | None] = mapped_column(Text)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -181,6 +189,10 @@ class Server(TimestampMixin, Base):
     # SSH hardening applied
     hardening_applied: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # JSON array of CIDR strings — if non-null, only these source IPs may connect
+    ip_allowlist: Mapped[str | None] = mapped_column(Text)
+    # Privileged session controls (JSON object)
+    session_policy: Mapped[str | None] = mapped_column(Text)
 
     proxy_jump_server: Mapped[Server | None] = relationship("Server", remote_side="Server.id")
     sessions: Mapped[list[Session]] = relationship(back_populates="server")
@@ -202,6 +214,7 @@ class ServerAccess(TimestampMixin, Base):
     provisioned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     provisioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     user: Mapped[User] = relationship(back_populates="server_access")
     server: Mapped[Server] = relationship(back_populates="server_access")
@@ -273,6 +286,8 @@ class AuditLog(TimestampMixin, Base):
     ip_address: Mapped[str | None] = mapped_column(String(45))
     success: Mapped[bool] = mapped_column(Boolean, nullable=False)
     node_id: Mapped[str | None] = mapped_column(String(64))
+    # HMAC-SHA256 of the entry content, chained to the previous entry's HMAC
+    integrity_hash: Mapped[str | None] = mapped_column(String(64))
 
     user: Mapped[User | None] = relationship(back_populates="audit_logs")
 
@@ -433,3 +448,114 @@ class DualApprovalRequest(TimestampMixin, Base):
 
     initiator: Mapped[User] = relationship(foreign_keys=[initiated_by_user_id])
     reviewer: Mapped[User | None] = relationship(foreign_keys=[reviewed_by_user_id])
+
+
+# ── User groups ───────────────────────────────────────────────────────────────
+
+
+class UserGroup(TimestampMixin, Base):
+    """A named group of users. Access grants can target a group rather than individual users."""
+
+    __tablename__ = "user_groups"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(String(512))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    memberships: Mapped[list[UserGroupMembership]] = relationship(back_populates="group")
+
+
+class UserGroupMembership(TimestampMixin, Base):
+    """Association between a user and a group."""
+
+    __tablename__ = "user_group_memberships"
+    __table_args__ = (UniqueConstraint("user_id", "group_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    group_id: Mapped[str] = mapped_column(String(36), ForeignKey("user_groups.id"), nullable=False)
+
+    user: Mapped[User] = relationship()
+    group: Mapped[UserGroup] = relationship(back_populates="memberships")
+
+
+class GroupServerAccess(TimestampMixin, Base):
+    """Grants a group access to a server. Membership changes auto-provision/deprovision."""
+
+    __tablename__ = "group_server_access"
+    __table_args__ = (UniqueConstraint("group_id", "server_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    group_id: Mapped[str] = mapped_column(String(36), ForeignKey("user_groups.id"), nullable=False)
+    server_id: Mapped[str] = mapped_column(String(36), ForeignKey("servers.id"), nullable=False)
+    allow_sudo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    remote_username: Mapped[str | None] = mapped_column(String(64))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    group: Mapped[UserGroup] = relationship()
+    server: Mapped[Server] = relationship()
+
+
+# ── Anomaly baseline ──────────────────────────────────────────────────────────
+
+
+class AnomalyBaseline(TimestampMixin, Base):
+    """Rolling per-user baseline statistics for anomaly detection."""
+
+    __tablename__ = "anomaly_baselines"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=False, unique=True, index=True
+    )
+    # JSON: list of UTC hours (0–23) seen in successful logins over the rolling window
+    typical_hours: Mapped[str | None] = mapped_column(Text)
+    # JSON: list of source IPs seen in successful logins
+    known_ips: Mapped[str | None] = mapped_column(Text)
+    # Average session duration in seconds over the rolling window
+    avg_session_duration_seconds: Mapped[float | None] = mapped_column()
+    # Average bytes transferred per session
+    avg_session_bytes: Mapped[float | None] = mapped_column()
+    # Number of samples used to compute the baseline
+    sample_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship()
+
+
+# ── Recording decrypt log ─────────────────────────────────────────────────────
+
+
+class RecordingDecryptLog(TimestampMixin, Base):
+    """Audit trail for recording decryption events — tracks who decrypted what and when."""
+
+    __tablename__ = "recording_decrypt_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    session_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("sessions.id"), nullable=False, index=True
+    )
+    admin_user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=False, index=True
+    )
+    # Fingerprint of the admin-derived key used (not the key itself)
+    key_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    admin: Mapped[User] = relationship()
+
+
+# ── Bastion cluster nodes ─────────────────────────────────────────────────────
+
+
+class BastionNode(TimestampMixin, Base):
+    """Registry of Bastion cluster nodes in HA mode."""
+
+    __tablename__ = "bastion_nodes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    node_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    version: Mapped[str | None] = mapped_column(String(64))
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # JSON: load metrics snapshot
+    load_metrics: Mapped[str | None] = mapped_column(Text)
