@@ -11,6 +11,7 @@ from bastion.config import get_settings
 from bastion.logging import configure_logging, get_logger
 from bastion_admin.routers import audit, certificates, servers, users
 from bastion_admin.routers.access_requests import router as access_requests_router
+from bastion_admin.routers.compliance import router as compliance_router
 from bastion_admin.routers.dual_approvals import router as dual_approvals_router
 from bastion_admin.routers.sessions import router as admin_sessions_router
 
@@ -46,6 +47,7 @@ app.include_router(audit.router)
 app.include_router(access_requests_router)
 app.include_router(dual_approvals_router)
 app.include_router(admin_sessions_router)
+app.include_router(compliance_router)
 
 
 @app.middleware("http")
