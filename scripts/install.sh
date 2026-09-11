@@ -144,13 +144,22 @@ DB_URL=sqlite+aiosqlite:////opt/bastion/data/bastion.db
 
 REDIS_URL=redis://localhost:6379/0
 
+# CA key passphrase — set this to encrypt the CA private key at rest
+# CA_KEY_PASSPHRASE=
+
 SSH_CERT_VALIDITY_HOURS=8
 RECORDINGS_ENABLED=true
 RECORDINGS_STORAGE=local
 
 TOTP_ISSUER=Bastion
+MFA_EMAIL_CODE_EXPIRE_MINUTES=10
+RATE_LIMIT_AUTH_PER_MINUTE=10
 ANOMALY_SCORE_ALERT_THRESHOLD=70
 PACKAGE_CHECK_INTERVAL_HOURS=6
+
+# Dual approval — set to true for multi-admin deployments
+DUAL_APPROVAL_REQUIRED=false
+DUAL_APPROVAL_WINDOW_MINUTES=30
 EOF
     chmod 600 "$BASTION_ROOT/.env"
     chown "$BASTION_USER:$BASTION_GROUP" "$BASTION_ROOT/.env"
@@ -160,15 +169,18 @@ fi
 # ── SSH CA keypair ────────────────────────────────────────────────────────────
 if [[ ! -f "$BASTION_ROOT/ca/bastion_ca" ]]; then
     log "Generating SSH CA keypair..."
+    # Generate a random CA key passphrase and store it in the .env
+    CA_PASSPHRASE=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+    echo "CA_KEY_PASSPHRASE=${CA_PASSPHRASE}" >> "$BASTION_ROOT/.env"
     sudo -u "$BASTION_USER" "$BASTION_ROOT/venv/bin/python" -c "
 import sys
 sys.path.insert(0, '/opt/bastion/app')
 from bastion.crypto.ca import generate_ca_keypair
 from pathlib import Path
-generate_ca_keypair(Path('/opt/bastion/ca/bastion_ca'))
+generate_ca_keypair(Path('/opt/bastion/ca/bastion_ca'), passphrase=b'${CA_PASSPHRASE}')
 "
-    log "CA keypair generated at $BASTION_ROOT/ca/bastion_ca"
-    log "IMPORTANT: Back up $BASTION_ROOT/ca/bastion_ca securely."
+    log "CA keypair generated at $BASTION_ROOT/ca/bastion_ca (encrypted with passphrase)"
+    log "IMPORTANT: Back up $BASTION_ROOT/ca/bastion_ca and the CA_KEY_PASSPHRASE securely."
 fi
 
 # ── Redis configuration ───────────────────────────────────────────────────────

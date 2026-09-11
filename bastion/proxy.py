@@ -127,7 +127,28 @@ class BastionSSHSession(asyncssh.SSHServerSession):
         asyncio.create_task(self._forward_output())
 
     async def _forward_output(self) -> None:
-        """Forward output from the target server to the client, recording as we go."""
+        """Forward output from the target server to the client, recording as we go.
+
+        Also listens for admin kill signals via Redis pub/sub and terminates
+        the connection if one is received.
+        """
+        import asyncio
+
+        from bastion.session_kill import subscribe_kill_signal
+
+        async def _watch_for_kill() -> None:
+            """Background task that terminates the session on a kill signal."""
+            async for _ in subscribe_kill_signal(self._session_record.id):
+                log.info(
+                    "Kill signal received — terminating session",
+                    session_id=self._session_record.id,
+                )
+                if self._target_process:
+                    self._target_process.close()
+                self._chan.exit(1)
+                break
+
+        kill_task = asyncio.create_task(_watch_for_kill())
         try:
             async for data in self._target_process.stdout:  # type: ignore[union-attr]
                 if isinstance(data, str):
@@ -141,6 +162,7 @@ class BastionSSHSession(asyncssh.SSHServerSession):
                 "Output forwarding ended", session_id=self._session_record.id, reason=str(exc)
             )
         finally:
+            kill_task.cancel()
             exit_status = self._target_process.exit_status or 0  # type: ignore[union-attr]
             self._chan.exit(exit_status)
             await self._finalise()
