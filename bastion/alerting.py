@@ -57,6 +57,8 @@ async def _send(
         AlertChannel.SLACK: _send_slack,
         AlertChannel.PAGERDUTY: _send_pagerduty,
         AlertChannel.PUSHOVER: _send_pushover,
+        AlertChannel.WEBHOOK: _send_webhook,
+        AlertChannel.SYSLOG: _send_syslog,
     }
     handler = handlers.get(channel)
     if handler:
@@ -184,3 +186,65 @@ async def _send_pushover(subject: str, body: str, severity: AlertSeverity, confi
             },
             timeout=10,
         )
+
+
+async def _send_webhook(subject: str, body: str, severity: AlertSeverity, config: dict) -> None:
+    """Send an alert to a generic outbound webhook with HMAC-SHA256 signature."""
+    import hashlib
+    import hmac as _hmac
+    import time
+
+    settings = get_settings()
+    url = config.get("url") or settings.webhook_url
+    if not url:
+        log.warning("Webhook alert skipped — no URL configured")
+        return
+
+    payload = {
+        "subject": subject,
+        "body": body,
+        "severity": severity,
+        "timestamp": int(time.time()),
+        "source": "bastion",
+    }
+    payload_bytes = json.dumps(payload).encode()
+
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    secret = config.get("secret") or settings.webhook_secret
+    if secret:
+        sig = _hmac.new(secret.encode(), payload_bytes, digestmod="sha256").hexdigest()
+        headers["X-Bastion-Signature"] = f"sha256={sig}"
+
+    async with httpx.AsyncClient() as client:
+        await client.post(url, content=payload_bytes, headers=headers, timeout=10)
+
+
+async def _send_syslog(subject: str, body: str, severity: AlertSeverity, config: dict) -> None:
+    """Forward an alert to a remote syslog endpoint (RFC 5424)."""
+    import socket
+    import time
+
+    settings = get_settings()
+    host = config.get("host") or settings.syslog_host
+    if not host:
+        log.warning("Syslog alert skipped — no host configured")
+        return
+
+    port = int(config.get("port") or settings.syslog_port)
+    protocol = config.get("protocol") or settings.syslog_protocol
+    facility = int(config.get("facility") or settings.syslog_facility)
+
+    severity_map = {"info": 6, "warning": 4, "critical": 2}
+    sev_num = severity_map.get(severity, 5)
+    pri = facility * 8 + sev_num
+
+    ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    message = f"<{pri}>1 {ts} bastion bastion - - - {subject}: {body}"
+    msg_bytes = message.encode("utf-8")[:1024]
+
+    if protocol == "tcp":
+        with socket.create_connection((host, port), timeout=5) as sock:
+            sock.sendall(msg_bytes + b"\n")
+    else:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.sendto(msg_bytes, (host, port))
