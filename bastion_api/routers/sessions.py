@@ -111,8 +111,6 @@ async def connect(
         )
 
     # ── Server IP allowlist check ─────────────────────────────────────────────
-    from bastion_api.deps import get_client_ip
-
     client_ip = get_client_ip(request)
     if not check_ip_allowed(client_ip, server.ip_allowlist):
         raise HTTPException(

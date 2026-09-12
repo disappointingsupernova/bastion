@@ -319,8 +319,6 @@ class TestDecryptRecording:
 
             identity_paths_used: list[str] = []
 
-            original_run = __import__("subprocess").run
-
             def capture_identity(args, **kwargs):
                 # Record the identity file path passed to age
                 if "--identity" in args:
