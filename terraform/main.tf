@@ -54,23 +54,17 @@ resource "null_resource" "bastion_user" {
   }
 
   provisioner "local-exec" {
-    command = <<-CMD
-      python3 -c "
-from bastion.client import BastionClient
-import os
-client = BastionClient(token=os.environ['BASTION_TOKEN'], socket_path='${var.bastion_socket}')
-client.create_user(
-    username='${each.value.username}',
-    email='${each.value.email}',
-    password=os.environ.get('BASTION_USER_PASSWORD_${upper(each.key)}', __import__('secrets').token_urlsafe(16)),
-    full_name='${lookup(each.value, "full_name", "")}',
-    role='${lookup(each.value, "role", "user")}',
-)
-print('Created user ${each.value.username}')
-"
-    CMD
+    # All user-supplied values are passed as environment variables and read
+    # inside Python — never interpolated into the script string to prevent
+    # shell injection via values containing quotes or backslashes.
+    command = "python3 -c 'import os; from bastion.client import BastionClient; c = BastionClient(token=os.environ[\"BASTION_TOKEN\"], socket_path=os.environ[\"BASTION_SOCKET\"]); c.create_user(username=os.environ[\"B_USERNAME\"], email=os.environ[\"B_EMAIL\"], password=os.environ.get(\"B_PASSWORD\") or __import__(\"secrets\").token_urlsafe(16), full_name=os.environ.get(\"B_FULL_NAME\", \"\"), role=os.environ.get(\"B_ROLE\", \"user\")); print(\"Created user\", os.environ[\"B_USERNAME\"])'"
     environment = {
-      BASTION_TOKEN = var.bastion_token
+      BASTION_TOKEN  = var.bastion_token
+      BASTION_SOCKET = var.bastion_socket
+      B_USERNAME     = each.value.username
+      B_EMAIL        = each.value.email
+      B_FULL_NAME    = lookup(each.value, "full_name", "")
+      B_ROLE         = lookup(each.value, "role", "user")
     }
     on_failure = fail
   }
@@ -88,22 +82,14 @@ resource "null_resource" "bastion_server" {
   }
 
   provisioner "local-exec" {
-    command = <<-CMD
-      python3 -c "
-from bastion.client import BastionClient
-import os
-client = BastionClient(token=os.environ['BASTION_TOKEN'], socket_path='${var.bastion_socket}')
-client.onboard_server(
-    hostname='${each.value.hostname}',
-    display_name='${lookup(each.value, "display_name", each.value.hostname)}',
-    ssh_port=${lookup(each.value, "ssh_port", 22)},
-    environment='${lookup(each.value, "environment", "")}',
-)
-print('Onboarded server ${each.value.hostname}')
-"
-    CMD
+    command = "python3 -c 'import os; from bastion.client import BastionClient; c = BastionClient(token=os.environ[\"BASTION_TOKEN\"], socket_path=os.environ[\"BASTION_SOCKET\"]); c.onboard_server(hostname=os.environ[\"B_HOSTNAME\"], display_name=os.environ.get(\"B_DISPLAY_NAME\") or os.environ[\"B_HOSTNAME\"], ssh_port=int(os.environ.get(\"B_SSH_PORT\", \"22\")), environment=os.environ.get(\"B_ENVIRONMENT\", \"\")); print(\"Onboarded server\", os.environ[\"B_HOSTNAME\"])'"
     environment = {
-      BASTION_TOKEN = var.bastion_token
+      BASTION_TOKEN   = var.bastion_token
+      BASTION_SOCKET  = var.bastion_socket
+      B_HOSTNAME      = each.value.hostname
+      B_DISPLAY_NAME  = lookup(each.value, "display_name", "")
+      B_SSH_PORT      = tostring(lookup(each.value, "ssh_port", 22))
+      B_ENVIRONMENT   = lookup(each.value, "environment", "")
     }
     on_failure = fail
   }
@@ -121,21 +107,13 @@ resource "null_resource" "bastion_access" {
   }
 
   provisioner "local-exec" {
-    command = <<-CMD
-      python3 -c "
-from bastion.client import BastionClient
-import os
-client = BastionClient(token=os.environ['BASTION_TOKEN'], socket_path='${var.bastion_socket}')
-client.grant_access(
-    server_id='${each.value.server_id}',
-    user_id='${each.value.user_id}',
-    allow_sudo=${title(lookup(each.value, "allow_sudo", "false"))},
-)
-print('Granted access: user=${each.value.user_id} server=${each.value.server_id}')
-"
-    CMD
+    command = "python3 -c 'import os; from bastion.client import BastionClient; c = BastionClient(token=os.environ[\"BASTION_TOKEN\"], socket_path=os.environ[\"BASTION_SOCKET\"]); c.grant_access(server_id=os.environ[\"B_SERVER_ID\"], user_id=os.environ[\"B_USER_ID\"], allow_sudo=os.environ.get(\"B_ALLOW_SUDO\", \"false\").lower() == \"true\"); print(\"Granted access: user=\", os.environ[\"B_USER_ID\"], \"server=\", os.environ[\"B_SERVER_ID\"])'"
     environment = {
-      BASTION_TOKEN = var.bastion_token
+      BASTION_TOKEN  = var.bastion_token
+      BASTION_SOCKET = var.bastion_socket
+      B_SERVER_ID    = each.value.server_id
+      B_USER_ID      = each.value.user_id
+      B_ALLOW_SUDO   = tostring(lookup(each.value, "allow_sudo", false))
     }
     on_failure = fail
   }
