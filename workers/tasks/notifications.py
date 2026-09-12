@@ -162,14 +162,18 @@ async def _distribute_krl() -> None:
     success_count = 0
     failure_count = 0
 
+    ca_pub_key_text = krl_path.parent.joinpath("bastion_ca.pub").read_text().strip()
+    known_hosts = asyncssh.SSHKnownHosts(f"@cert-authority * {ca_pub_key_text}\n")
+    host_key_path = str(settings.ca_key_path.parent / "bastion_host_key")
+
     for server in servers:
         try:
             async with asyncssh.connect(
                 server.hostname,
                 port=server.ssh_port,
-                known_hosts=None,
+                known_hosts=known_hosts,
                 username="bastion",
-                client_keys=[str(settings.ca_key_path)],
+                client_keys=[host_key_path],
             ) as conn:
                 await conn.run(
                     "cat > /etc/ssh/bastion_krl && chmod 644 /etc/ssh/bastion_krl",
