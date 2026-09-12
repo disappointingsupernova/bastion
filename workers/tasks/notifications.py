@@ -251,10 +251,30 @@ async def _backup_database() -> None:
                 src.close()
         else:
             backup_file = tmp / f"bastion_{ts}.sql.gz"
+            # Parse the DB URL to extract credentials without exposing them on the
+            # command line (visible in ps aux). Credentials are passed via environment
+            # variables which are not visible to other processes.
+            from urllib.parse import urlparse
+
+            parsed = urlparse(settings.db_url)
+            pg_env = {
+                **__import__("os").environ,
+                "PGPASSWORD": parsed.password or "",
+            }
+            pg_args = ["pg_dump", f"--file={backup_file}", "--compress=9"]
+            if parsed.hostname:
+                pg_args += ["--host", parsed.hostname]
+            if parsed.port:
+                pg_args += ["--port", str(parsed.port)]
+            if parsed.username:
+                pg_args += ["--username", parsed.username]
+            if parsed.path and parsed.path.lstrip("/"):
+                pg_args.append(parsed.path.lstrip("/"))
             result = subprocess.run(
-                ["pg_dump", "--dbname", settings.db_url, "--compress=9", f"--file={backup_file}"],
+                pg_args,
                 capture_output=True,
                 timeout=300,
+                env=pg_env,
             )
             if result.returncode != 0:
                 stderr_out = result.stderr
