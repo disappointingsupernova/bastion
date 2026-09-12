@@ -108,8 +108,8 @@ async def import_users_csv(
         try:
             await db.flush()
             created += 1
-        except Exception as exc:
-            errors.append(f"Row {i}: database error — {exc}")
+        except Exception:
+            errors.append(f"Row {i}: database error whilst creating user '{username}' — skipped.")
             await db.rollback()
 
     await audit(
