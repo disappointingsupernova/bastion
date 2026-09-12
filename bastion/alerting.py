@@ -33,7 +33,21 @@ async def dispatch_alert(
         if severity_order.index(severity) < severity_order.index(config.min_severity):
             continue
         try:
-            channel_config = json.loads(config.config_json) if config.config_json else {}
+            from bastion.config import get_settings
+            from bastion.crypto.encryption import decrypt_secret
+
+            settings = get_settings()
+            if config.config_json:
+                try:
+                    channel_config = json.loads(
+                        decrypt_secret(config.config_json, settings.secret_key)
+                    )
+                except Exception:
+                    # Fall back to treating as unencrypted JSON for backwards compatibility
+                    # with records created before encryption was enforced.
+                    channel_config = json.loads(config.config_json)
+            else:
+                channel_config = {}
             await _send(config.channel, subject, body, severity, channel_config)
         except Exception as exc:
             log.error(
