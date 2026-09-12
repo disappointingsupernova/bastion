@@ -60,17 +60,30 @@ def _save_credentials(user: User, creds: list[dict[str, Any]], secret_key: str) 
     user.fido2_credentials = encrypt_secret(json.dumps(creds), secret_key)
 
 
-def begin_registration(user_id: str, username: str) -> dict[str, Any]:
-    """Generate PublicKeyCredentialCreationOptions for a new FIDO2 credential."""
+def begin_registration(user_id: str, username: str, secret_key: str) -> tuple[dict[str, Any], str]:
+    """Generate PublicKeyCredentialCreationOptions for a new FIDO2 credential.
+
+    Returns (options_dict, state_token). The state_token encodes the challenge
+    and must be passed back to complete_registration to verify attestation binding.
+    """
     server = _server()
     user_entity = PublicKeyCredentialUserEntity(
         id=user_id.encode(),
         name=username,
         display_name=username,
     )
-    options, _ = server.register_begin(user_entity, user_verification="preferred")  # type: ignore[arg-type]
-    # Convert to JSON-serialisable dict
-    return dict(options)  # type: ignore[return-value]
+    options, state = server.register_begin(user_entity, user_verification="preferred")  # type: ignore[arg-type]
+    state_token = jwt.encode(
+        {
+            "sub": user_id,
+            "type": "fido2_reg_pending",
+            "state": json.dumps(state),
+            "exp": int(time.time()) + _CHALLENGE_TOKEN_EXPIRE,
+        },
+        secret_key,
+        algorithm="HS256",
+    )
+    return dict(options), state_token  # type: ignore[return-value]
 
 
 async def complete_registration(
@@ -78,18 +91,35 @@ async def complete_registration(
     user: User,
     credential_response: dict[str, Any],
     secret_key: str,
+    state_token: str,
 ) -> None:
-    """Verify the attestation response and store the new credential."""
+    """Verify the attestation response and store the new credential.
+
+    The state_token issued by begin_registration is required to verify that the
+    attestation response corresponds to the challenge that was issued — preventing
+    replay of any valid attestation response.
+    """
+    try:
+        payload = jwt.decode(state_token, secret_key, algorithms=["HS256"])
+        if payload.get("type") != "fido2_reg_pending":
+            raise ValueError("Invalid token type — expected fido2_reg_pending")
+        state = json.loads(payload["state"])
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired FIDO2 registration state token — please restart registration.",
+        ) from exc
+
     server = _server()
     try:
         client_data = CollectedClientData(credential_response["clientDataJSON"])
         att_obj = AttestationObject(credential_response["attestationObject"])
-        auth_data = server.register_complete(None, client_data, att_obj)  # type: ignore[call-arg,arg-type]
+        auth_data = server.register_complete(state, client_data, att_obj)  # type: ignore[call-arg,arg-type]
     except Exception as exc:
         log.warning("FIDO2 registration failed", error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="FIDO2 registration failed — invalid attestation.",
+            detail="FIDO2 registration failed — invalid or replayed attestation response.",
         ) from exc
 
     creds = _load_credentials(user, secret_key)
@@ -125,7 +155,12 @@ async def begin_authentication(
         )
 
     server = _server()
-    options, state = server.authenticate_begin(user_verification="preferred")  # type: ignore[arg-type]
+    # Pass existing credentials so the authenticator receives allowCredentials
+    # guidance on which credential to use.
+    fido2_creds = [
+        {"type": "public-key", "id": bytes.fromhex(c["credential_id"])} for c in creds
+    ]
+    options, state = server.authenticate_begin(fido2_creds, user_verification="preferred")  # type: ignore[arg-type]
 
     state_token = jwt.encode(
         {
@@ -197,10 +232,29 @@ async def complete_authentication(
             detail="FIDO2 authentication failed.",
         ) from exc
 
-    # Update sign count
+    # Validate sign count to detect cloned authenticators (required by WebAuthn spec).
+    # A sign count of 0 from the authenticator means the device does not support
+    # counters — skip validation in that case only.
     for cred in creds:
         if cred["credential_id"] == credential_id.hex():
-            cred["sign_count"] = auth_data.counter
+            stored_count = cred.get("sign_count", 0)
+            new_count = auth_data.counter
+            if new_count != 0 and new_count <= stored_count:
+                log.error(
+                    "FIDO2 sign count did not increase — possible cloned authenticator",
+                    user_id=user_id,
+                    stored_count=stored_count,
+                    received_count=new_count,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=(
+                        "FIDO2 authentication rejected — sign count did not increase. "
+                        "Your authenticator may be cloned. Contact your administrator."
+                    ),
+                )
+            cred["sign_count"] = new_count
+            break
     _save_credentials(user, creds, secret_key)
     await db.flush()
 

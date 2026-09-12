@@ -84,9 +84,11 @@ class TotpVerifyRequest(BaseModel):
 
 class Fido2RegisterBeginResponse(BaseModel):
     options: dict  # PublicKeyCredentialCreationOptions as JSON
+    state_token: str  # Short-lived signed token encoding the challenge state
 
 
 class Fido2RegisterCompleteRequest(BaseModel):
+    state_token: str  # Token returned by /fido2/register/begin
     credential: dict  # AuthenticatorAttestationResponse as JSON
 
 
@@ -440,8 +442,9 @@ async def fido2_register_begin(
     """Begin FIDO2 credential registration — returns PublicKeyCredentialCreationOptions."""
     from bastion.fido2 import begin_registration
 
-    options = begin_registration(current_user.id, current_user.username)
-    return Fido2RegisterBeginResponse(options=options)
+    settings = get_settings()
+    options, state_token = begin_registration(current_user.id, current_user.username, settings.secret_key)
+    return Fido2RegisterBeginResponse(options=options, state_token=state_token)
 
 
 @router.post("/fido2/register/complete", status_code=status.HTTP_204_NO_CONTENT)
@@ -454,7 +457,7 @@ async def fido2_register_complete(
     from bastion.fido2 import complete_registration
 
     settings = get_settings()
-    await complete_registration(db, current_user, body.credential, settings.secret_key)
+    await complete_registration(db, current_user, body.credential, settings.secret_key, body.state_token)
     await audit(db, "auth.fido2.register", success=True, user_id=current_user.id)
     log.info("FIDO2 credential registered", user_id=current_user.id)
 
