@@ -340,12 +340,15 @@ async def open_proxy_session(
     settings = get_settings()
     known_hosts = _make_known_hosts(settings.ca_key_path.with_suffix(".pub"))
 
-    with tempfile.TemporaryDirectory(prefix="bastion-proxy-") as tmpdir:
-        tmp = Path(tmpdir)
+    # The TemporaryDirectory must remain alive for the entire duration of the
+    # SSH connection — key files must not be deleted during the handshake.
+    # We manage cleanup explicitly rather than using a context manager.
+    tmpdir_obj = tempfile.TemporaryDirectory(prefix="bastion-proxy-")
+    try:
+        tmp = Path(tmpdir_obj.name)
         key_file = tmp / "id_ed25519"
         cert_file = tmp / "id_ed25519-cert.pub"
 
-        # Write the user's public key and cert temporarily for asyncssh
         key_file.write_bytes(user_public_key_bytes)
         key_file.chmod(0o600)
         cert_file.write_bytes(cert_bytes)
@@ -381,6 +384,13 @@ async def open_proxy_session(
             port=server.ssh_port,
             **connect_kwargs,
         )
+    except Exception:
+        tmpdir_obj.cleanup()
+        raise
+    else:
+        # Attach the tmpdir to the connection so it is cleaned up when the
+        # connection is closed, not before.
+        conn._bastion_tmpdir = tmpdir_obj  # type: ignore[attr-defined]
 
     log.info(
         "Proxy SSH connection established",
