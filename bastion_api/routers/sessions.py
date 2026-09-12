@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +24,7 @@ from bastion.models import (
     SessionStatus,
     User,
 )
-from bastion_api.deps import get_current_user
+from bastion_api.deps import get_client_ip, get_current_user
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
@@ -51,6 +51,7 @@ class SessionSummary(BaseModel):
 @router.post("/connect")
 async def connect(
     body: ConnectRequest,
+    request: Request,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
@@ -110,8 +111,10 @@ async def connect(
         )
 
     # ── Server IP allowlist check ─────────────────────────────────────────────
-    # source_ip is recorded on the session; check server allowlist
-    if not check_ip_allowed("unix-socket", server.ip_allowlist):
+    from bastion_api.deps import get_client_ip
+
+    client_ip = get_client_ip(request)
+    if not check_ip_allowed(client_ip, server.ip_allowlist):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your source address is not permitted to connect to this server.",
