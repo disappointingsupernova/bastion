@@ -222,18 +222,28 @@ async def ldap_sync(
                 except Exception as exc:
                     errors.append(f"Failed to create {username}: {exc}")
 
-    # Suspend Bastion users not found in LDAP
-    all_users_result = await db.execute(
-        select(User).where(User.status == UserStatus.ACTIVE, User.deleted_at.is_(None))
-    )
-    for user in all_users_result.scalars().all():
-        if (
-            user.username not in ldap_usernames
-            and user.username not in settings.excluded_system_users
-        ):
-            user.status = UserStatus.SUSPENDED
-            suspended += 1
-            log.info("User suspended — not found in LDAP", username=user.username)
+    # Suspend Bastion users not found in LDAP.
+    # Guard against a complete lockout caused by an empty LDAP result set
+    # (e.g. LDAP outage or misconfigured filter): if no LDAP users were returned
+    # at all, skip the suspension sweep entirely.
+    if not ldap_usernames:
+        log.warning(
+            "LDAP sync returned no users — skipping suspension sweep to prevent system lockout. "
+            "Check LDAP connectivity and filter configuration."
+        )
+    else:
+        all_users_result = await db.execute(
+            select(User).where(User.status == UserStatus.ACTIVE, User.deleted_at.is_(None))
+        )
+        for user in all_users_result.scalars().all():
+            if (
+                user.username not in ldap_usernames
+                and user.username not in settings.excluded_system_users
+                and user.role != UserRole.ADMIN  # never auto-suspend admins
+            ):
+                user.status = UserStatus.SUSPENDED
+                suspended += 1
+                log.info("User suspended — not found in LDAP", username=user.username)
 
     await audit(
         db,
