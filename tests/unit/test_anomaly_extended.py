@@ -117,7 +117,7 @@ class TestOffHoursAndWeekend:
             patch("bastion.anomaly.datetime") as mock_dt,
         ):
             mock_dt.now.return_value = fixed_3am
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            mock_dt.side_effect = datetime
             result = await evaluate_login(db_session, user, "1.2.3.4", success=True)
 
         # Off-hours should fire (3am is outside 6-22)
@@ -148,7 +148,7 @@ class TestOffHoursAndWeekend:
             patch("bastion.anomaly.datetime") as mock_dt,
         ):
             mock_dt.now.return_value = fixed_3am
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            mock_dt.side_effect = datetime
             result = await evaluate_login(db_session, user, "1.2.3.4", success=True)
 
         assert result is not None
@@ -173,7 +173,7 @@ class TestOffHoursAndWeekend:
 
         with patch("bastion.anomaly.datetime") as mock_dt:
             mock_dt.now.return_value = fixed_noon
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            mock_dt.side_effect = datetime
             result = await evaluate_login(db_session, user, "1.2.3.4", success=True)
 
         assert result is None
@@ -206,7 +206,7 @@ class TestOffHoursAndWeekend:
             patch("bastion.anomaly.datetime") as mock_dt,
         ):
             mock_dt.now.return_value = saturday_noon
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            mock_dt.side_effect = datetime
             result = await evaluate_login(db_session, user, "1.2.3.4", success=True)
 
         assert result is not None

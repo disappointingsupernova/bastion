@@ -123,7 +123,7 @@ class TestSendPagerduty:
                 await _send_pagerduty("subject", "body", AlertSeverity.CRITICAL, {})
                 mock_client.post.assert_called_once()
                 call_args = mock_client.post.call_args
-                assert "pagerduty.com" in call_args[0][0]
+                assert call_args[0][0] == "https://events.pagerduty.com/v2/enqueue"
 
     async def test_severity_mapping_critical(self):
         """_send_pagerduty must map 'critical' severity correctly."""

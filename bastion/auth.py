@@ -105,16 +105,14 @@ def _hash_code(code: str, user_id: str) -> str:
 
     Keying the hash to user_id means a precomputed table of all 900,000
     possible 6-digit codes cannot be used across users (fix #12).
-    Uses hmac.new with the sha256 module reference (not a string) so that
-    static analysis tools correctly identify the algorithm as SHA-256.
     """
     import hashlib
 
-    return hmac.new(
+    return hmac.digest(
         user_id.encode(),
         code.encode(),
-        digestmod=hashlib.sha256,
-    ).hexdigest()
+        digest=hashlib.sha256,
+    ).hex()
 
 
 async def create_email_mfa_code(db: AsyncSession, user_id: str) -> str:

@@ -85,8 +85,8 @@ class TestListServers:
             "/servers/", headers={"Authorization": f"Bearer {admin_token}"}
         )
         assert response.status_code == 200
-        hostnames = [s["hostname"] for s in response.json()]
-        assert "test.example.com" in hostnames
+        servers = response.json()
+        assert any(s["hostname"] == "test.example.com" for s in servers)
 
     async def test_auditor_can_list_servers(
         self, admin_client: AsyncClient, auditor_token: str, test_server
