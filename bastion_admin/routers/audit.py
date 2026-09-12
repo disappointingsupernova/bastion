@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,6 +58,11 @@ async def list_audit_logs(
     if user_id:
         query = query.where(AuditLog.user_id == user_id)
     if action:
+        if len(action) > 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Action filter must not exceed 200 characters.",
+            )
         query = query.where(AuditLog.action.ilike(f"%{action}%"))
     if success is not None:
         query = query.where(AuditLog.success == success)
