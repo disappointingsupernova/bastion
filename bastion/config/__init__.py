@@ -48,9 +48,22 @@ class Settings(BaseSettings):
     bastion_admin_socket: Path = Path("/opt/bastion/run/bastion-admin.sock")
 
     # ── JWT ───────────────────────────────────────────────────────────────────
+    # jwt_algorithm is intentionally hardcoded — allowing it to be set via
+    # environment would permit an attacker to set it to 'none' or an asymmetric
+    # algorithm to forge tokens.
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60
     jwt_refresh_token_expire_days: int = 7
+
+    @field_validator("jwt_algorithm", mode="after")
+    @classmethod
+    def _lock_jwt_algorithm(cls, v: str) -> str:
+        """Reject any attempt to override the JWT algorithm via configuration."""
+        if v != "HS256":
+            raise ValueError(
+                "JWT algorithm must be HS256 — configuring a different algorithm is not permitted."
+            )
+        return v
 
     # ── SSH CA ────────────────────────────────────────────────────────────────
     ca_key_path: Path = Path("/opt/bastion/ca/bastion_ca")
