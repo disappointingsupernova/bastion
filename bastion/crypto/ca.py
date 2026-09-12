@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import time
 from datetime import UTC, datetime
@@ -386,11 +385,10 @@ async def _rebuild_krl(db: AsyncSession) -> None:
 
     import tempfile
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".serials", delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".serials", delete=True, dir=krl_path.parent) as f:
         f.write("\n".join(f"serial:{s}" for s in serials))
+        f.flush()
         serial_file = f.name
-
-    try:
         subprocess.run(
             [
                 "ssh-keygen",
@@ -405,7 +403,5 @@ async def _rebuild_krl(db: AsyncSession) -> None:
             timeout=10,
             check=True,
         )
-    finally:
-        os.unlink(serial_file)
 
     log.info("KRL rebuilt", revoked_count=len(serials), krl_path=str(krl_path))
