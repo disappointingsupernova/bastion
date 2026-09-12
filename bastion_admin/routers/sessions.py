@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -175,28 +175,38 @@ async def tail_live_session(
 
 
 class PlaybackRequest(BaseModel):
-    age_identity: str  # The admin's age identity file content — never stored
+    """Request body for recording playback — does not contain the age identity.
+
+    The age identity (private key) is passed via the X-Age-Identity request header
+    to avoid it being captured by request-body logging middleware.
+    """
 
 
 @router.post("/{session_id}/playback")
 async def playback_recording(
     session_id: str,
-    body: PlaybackRequest,
+    request: Request,
     current_user: Annotated[User, Depends(_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> StreamingResponse:
     """Stream a decrypted session recording back to an authorised admin.
 
-    The admin provides their age identity (private key) in the request body.
-    It is used immediately for decryption and never stored.
+    The admin provides their age identity (private key) in the X-Age-Identity
+    request header. It is used immediately for decryption and never stored.
+    Passing it as a header rather than a request body prevents it being captured
+    by any request-body logging middleware.
     Each decryption event is logged with the admin's key fingerprint.
-
-    For admin-derived keys: use the /sessions/{id}/playback/derived endpoint
-    which derives a per-admin key from the master recordings key.
     """
     from pathlib import Path
 
     from bastion.recordings import decrypt_recording
+
+    age_identity = request.headers.get("X-Age-Identity", "")
+    if not age_identity:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Age-Identity header is required — provide your age identity key.",
+        )
 
     result = await db.execute(select(Session).where(Session.id == session_id))
     session = result.scalar_one_or_none()
@@ -214,7 +224,7 @@ async def playback_recording(
         )
 
     try:
-        plaintext = decrypt_recording(recording_path, body.age_identity)
+        plaintext = decrypt_recording(recording_path, age_identity)
     except RuntimeError as exc:
         await audit(
             db,
@@ -233,7 +243,7 @@ async def playback_recording(
     # Log the decryption event with a fingerprint of the identity used
     import hashlib
 
-    key_fingerprint = hashlib.sha256(body.age_identity.encode()).hexdigest()[:16]
+    key_fingerprint = hashlib.sha256(age_identity.encode()).hexdigest()[:16]
     decrypt_log = RecordingDecryptLog(
         session_id=session_id,
         admin_user_id=current_user.id,
