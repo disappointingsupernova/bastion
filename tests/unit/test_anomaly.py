@@ -342,3 +342,131 @@ class TestEvaluateCertIssuance:
 
         assert result is not None
         assert result.score == SCORE_RAPID_CERT_ISSUANCE
+
+
+@pytest.mark.asyncio
+class TestBaselineAwareSessionScoring:
+    """Tests for evaluate_session when a per-user baseline exists."""
+
+    async def test_bytes_far_above_baseline_scores(self, db_session):
+        """A session with bytes >> baseline average must score via deviation."""
+        from bastion.models import AnomalyBaseline
+
+        user = _make_user()
+        server = _make_server()
+        db_session.add(user)
+        db_session.add(server)
+        await db_session.flush()
+
+        db_session.add(AnomalyBaseline(user_id=user.id, avg_session_bytes=1024.0, sample_count=10))
+        await db_session.flush()
+
+        big = 10 * 1024 * 1024  # 10 MB — far above 1 KB baseline
+        session = _make_session(user.id, server.id, bytes_sent=big, bytes_received=big)
+        db_session.add(session)
+        await db_session.flush()
+
+        with patch("bastion.anomaly.get_settings", return_value=_settings_with_low_threshold()):
+            result = await evaluate_session(db_session, session)
+
+        assert result is not None
+        assert result.score > 0
+
+    async def test_duration_far_above_baseline_scores(self, db_session):
+        """A session much longer than the baseline average must trigger a long-session anomaly."""
+        from bastion.models import AnomalyBaseline
+
+        user = _make_user()
+        server = _make_server()
+        db_session.add(user)
+        db_session.add(server)
+        await db_session.flush()
+
+        db_session.add(
+            AnomalyBaseline(user_id=user.id, avg_session_duration_seconds=300.0, sample_count=10)
+        )
+        await db_session.flush()
+
+        now = datetime.now(tz=UTC)
+        session = Session(
+            user_id=user.id,
+            server_id=server.id,
+            status=SessionStatus.COMPLETED,
+            started_at=now - timedelta(hours=5),  # 5 hours vs 5-minute baseline
+            ended_at=now,
+            bytes_sent=0,
+            bytes_received=0,
+        )
+        db_session.add(session)
+        await db_session.flush()
+
+        with patch("bastion.anomaly.get_settings", return_value=_settings_with_low_threshold()):
+            result = await evaluate_session(db_session, session)
+
+        assert result is not None
+
+    async def test_long_session_fixed_threshold_no_baseline(self, db_session):
+        """A session > 8h with no baseline must trigger the fixed long-session threshold."""
+        from bastion.anomaly import ET_LONG_SESSION
+
+        user = _make_user()
+        server = _make_server()
+        db_session.add(user)
+        db_session.add(server)
+        await db_session.flush()
+
+        now = datetime.now(tz=UTC)
+        session = Session(
+            user_id=user.id,
+            server_id=server.id,
+            status=SessionStatus.COMPLETED,
+            started_at=now - timedelta(hours=9),
+            ended_at=now,
+            bytes_sent=0,
+            bytes_received=0,
+        )
+        db_session.add(session)
+        await db_session.flush()
+
+        with patch("bastion.anomaly.get_settings", return_value=_settings_with_low_threshold()):
+            result = await evaluate_session(db_session, session)
+
+        assert result is not None
+        assert result.event_type == ET_LONG_SESSION
+
+    async def test_session_within_baseline_norms_no_anomaly(self, db_session):
+        """A session within all baseline norms must not trigger an anomaly."""
+        from bastion.models import AnomalyBaseline
+
+        user = _make_user()
+        server = _make_server()
+        db_session.add(user)
+        db_session.add(server)
+        await db_session.flush()
+
+        db_session.add(
+            AnomalyBaseline(
+                user_id=user.id,
+                avg_session_bytes=float(1024 * 1024),
+                avg_session_duration_seconds=300.0,
+                typical_hours=json.dumps(list(range(24))),
+                sample_count=20,
+            )
+        )
+        await db_session.flush()
+
+        now = datetime.now(tz=UTC)
+        session = Session(
+            user_id=user.id,
+            server_id=server.id,
+            status=SessionStatus.COMPLETED,
+            started_at=now - timedelta(minutes=5),
+            ended_at=now,
+            bytes_sent=512 * 1024,
+            bytes_received=512 * 1024,
+        )
+        db_session.add(session)
+        await db_session.flush()
+
+        result = await evaluate_session(db_session, session)
+        assert result is None

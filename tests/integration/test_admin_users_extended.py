@@ -162,6 +162,45 @@ class TestUpdateUser:
         )
         assert response.status_code == 200
 
+    async def test_update_ssh_public_key_sets_updated_at(
+        self,
+        admin_client: AsyncClient,
+        admin_token: str,
+        regular_user,
+        db_session,
+    ):
+        """Updating ssh_public_key must set ssh_public_key_updated_at."""
+        response = await admin_client.patch(
+            f"/users/{regular_user.id}",
+            json={"ssh_public_key": "ssh-ed25519 AAAA newkey"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 200
+        await db_session.refresh(regular_user)
+        assert regular_user.ssh_public_key == "ssh-ed25519 AAAA newkey"
+        assert regular_user.ssh_public_key_updated_at is not None
+
+    async def test_update_ip_allowlist_stores_cidrs(
+        self,
+        admin_client: AsyncClient,
+        admin_token: str,
+        regular_user,
+        db_session,
+    ):
+        """Updating ip_allowlist must store the JSON-encoded CIDR list."""
+        import json
+
+        response = await admin_client.patch(
+            f"/users/{regular_user.id}",
+            json={"ip_allowlist": ["10.0.0.0/8", "192.168.1.0/24"]},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 200
+        await db_session.refresh(regular_user)
+        stored = json.loads(regular_user.ip_allowlist)
+        assert "10.0.0.0/8" in stored
+        assert "192.168.1.0/24" in stored
+
     async def test_update_nonexistent_user_returns_404(
         self, admin_client: AsyncClient, admin_token: str
     ):

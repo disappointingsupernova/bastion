@@ -217,6 +217,168 @@ class TestTerminateSession:
 
 
 @pytest.mark.asyncio
+class TestAdminSessions:
+    """Tests for the admin /sessions/ endpoints."""
+
+    async def test_admin_list_all_sessions_empty(self, admin_client: AsyncClient, admin_token: str):
+        """With no sessions, the admin list must be empty."""
+        response = await admin_client.get(
+            "/sessions/",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 200
+        assert response.json() == []
+
+    async def test_admin_list_sessions_active_only_filter(
+        self,
+        admin_client: AsyncClient,
+        admin_token: str,
+        regular_user,
+        test_server,
+        db_session,
+    ):
+        """active_only=true must exclude completed sessions."""
+        from datetime import UTC, datetime
+
+        from bastion.models import Session, SessionStatus
+
+        db_session.add(
+            Session(
+                user_id=regular_user.id,
+                server_id=test_server.id,
+                status=SessionStatus.COMPLETED,
+                started_at=datetime.now(tz=UTC),
+            )
+        )
+        await db_session.flush()
+
+        response = await admin_client.get(
+            "/sessions/",
+            params={"active_only": True},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 200
+        assert response.json() == []
+
+    async def test_admin_terminate_nonexistent_session_returns_404(
+        self, admin_client: AsyncClient, admin_token: str
+    ):
+        """Terminating a non-existent session must return 404."""
+        response = await admin_client.post(
+            "/sessions/nonexistent-id/terminate",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 404
+
+    async def test_admin_tail_nonexistent_session_returns_404(
+        self, admin_client: AsyncClient, admin_token: str
+    ):
+        """Tailing a non-existent session must return 404."""
+        response = await admin_client.get(
+            "/sessions/nonexistent-id/tail",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 404
+
+    async def test_admin_playback_nonexistent_session_returns_404(
+        self, admin_client: AsyncClient, admin_token: str
+    ):
+        """Playback of a non-existent session must return 404."""
+        response = await admin_client.post(
+            "/sessions/nonexistent-id/playback",
+            json={"age_identity": "AGE-SECRET-KEY-1fake"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 404
+
+    async def test_admin_playback_session_without_recording_returns_404(
+        self,
+        admin_client: AsyncClient,
+        admin_token: str,
+        regular_user,
+        test_server,
+        db_session,
+    ):
+        """Playback of a session with no recording_path must return 404."""
+        from datetime import UTC, datetime
+
+        from bastion.models import Session, SessionStatus
+
+        session = Session(
+            user_id=regular_user.id,
+            server_id=test_server.id,
+            status=SessionStatus.COMPLETED,
+            started_at=datetime.now(tz=UTC),
+            recording_path=None,
+        )
+        db_session.add(session)
+        await db_session.flush()
+
+        response = await admin_client.post(
+            f"/sessions/{session.id}/playback",
+            json={"age_identity": "AGE-SECRET-KEY-1fake"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 404
+
+    async def test_admin_playback_derived_no_master_key_returns_501(
+        self, admin_client: AsyncClient, admin_token: str
+    ):
+        """Derived playback without RECORDINGS_MASTER_KEY configured must return 501."""
+        response = await admin_client.get(
+            "/sessions/some-id/playback/derived",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 501
+
+    async def test_non_admin_cannot_terminate_session(
+        self, admin_client: AsyncClient, user_token: str
+    ):
+        """A non-admin must receive 403 when attempting to terminate a session."""
+        response = await admin_client.post(
+            "/sessions/some-id/terminate",
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+        assert response.status_code == 403
+
+    async def test_admin_terminate_active_session(
+        self,
+        admin_client: AsyncClient,
+        admin_token: str,
+        regular_user,
+        test_server,
+        db_session,
+    ):
+        """An admin must be able to terminate an active session via Redis kill signal."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, patch
+
+        from bastion.models import Session, SessionStatus
+
+        session = Session(
+            user_id=regular_user.id,
+            server_id=test_server.id,
+            status=SessionStatus.ACTIVE,
+            started_at=datetime.now(tz=UTC),
+        )
+        db_session.add(session)
+        await db_session.flush()
+
+        with patch(
+            "bastion_admin.routers.sessions.publish_kill_signal",
+            new_callable=AsyncMock,
+        ):
+            response = await admin_client.post(
+                f"/sessions/{session.id}/terminate",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+
+        assert response.status_code == 204
+        await db_session.refresh(session)
+        assert session.status == SessionStatus.TERMINATED
+
+
+@pytest.mark.asyncio
 class TestConnectSession:
     """Tests for POST /sessions/connect."""
 

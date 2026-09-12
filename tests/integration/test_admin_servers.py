@@ -247,7 +247,130 @@ class TestDeleteServer:
 
 
 @pytest.mark.asyncio
-class TestPackageEndpoints:
+class TestServerOperations:
+    """Tests for provision, reboot, and package update endpoints."""
+
+    async def test_provision_queues_celery_task(
+        self,
+        admin_client: AsyncClient,
+        admin_token: str,
+        test_server,
+    ):
+        """POST /servers/{id}/provision must queue a Celery task and return 202."""
+        from unittest.mock import MagicMock, patch
+
+        with patch("celery.current_app") as mock_app:
+            mock_app.send_task = MagicMock()
+            response = await admin_client.post(
+                f"/servers/{test_server.id}/provision",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+
+        assert response.status_code == 202
+
+    async def test_reboot_queues_celery_task(
+        self,
+        admin_client: AsyncClient,
+        admin_token: str,
+        test_server,
+    ):
+        """POST /servers/{id}/reboot must queue a Celery task and return 202."""
+        from unittest.mock import MagicMock, patch
+
+        with patch("celery.current_app") as mock_app:
+            mock_app.send_task = MagicMock()
+            response = await admin_client.post(
+                f"/servers/{test_server.id}/reboot",
+                params={"delay_seconds": 60},
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+
+        assert response.status_code == 202
+
+    async def test_reboot_delay_below_minimum_returns_422(
+        self,
+        admin_client: AsyncClient,
+        admin_token: str,
+        test_server,
+    ):
+        """A delay_seconds below 60 must return 422."""
+        response = await admin_client.post(
+            f"/servers/{test_server.id}/reboot",
+            params={"delay_seconds": 10},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 422
+
+    async def test_reboot_delay_above_maximum_returns_422(
+        self,
+        admin_client: AsyncClient,
+        admin_token: str,
+        test_server,
+    ):
+        """A delay_seconds above 3600 must return 422."""
+        response = await admin_client.post(
+            f"/servers/{test_server.id}/reboot",
+            params={"delay_seconds": 9999},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 422
+
+    async def test_package_update_queues_celery_task(
+        self,
+        admin_client: AsyncClient,
+        admin_token: str,
+        test_server,
+    ):
+        """POST /servers/{id}/packages/update must queue a Celery task and return 202."""
+        from unittest.mock import MagicMock, patch
+
+        with patch("celery.current_app") as mock_app:
+            mock_app.send_task = MagicMock()
+            response = await admin_client.post(
+                f"/servers/{test_server.id}/packages/update",
+                json={"package_names": ["openssl"]},
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+
+        assert response.status_code == 202
+
+    async def test_grant_access_with_expiry_date(
+        self,
+        admin_client: AsyncClient,
+        admin_token: str,
+        test_server,
+        regular_user,
+    ):
+        """Granting access with an expires_at must be accepted and stored."""
+        response = await admin_client.post(
+            f"/servers/{test_server.id}/access",
+            json={
+                "user_id": regular_user.id,
+                "allow_sudo": False,
+                "expires_at": "2099-12-31T23:59:59Z",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 201
+
+    async def test_onboard_server_with_environment_and_policy(
+        self,
+        admin_client: AsyncClient,
+        admin_token: str,
+    ):
+        """Onboarding with environment, ip_allowlist, and session_policy must succeed."""
+        response = await admin_client.post(
+            "/servers/",
+            json={
+                "hostname": "policy.example.com",
+                "environment": "production",
+                "ip_allowlist": ["10.0.0.0/8"],
+                "session_policy": {"block_scp": True},
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 201
+
     """Tests for GET /servers/{id}/packages."""
 
     async def test_empty_package_list(

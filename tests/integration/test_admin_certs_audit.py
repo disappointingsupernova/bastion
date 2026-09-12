@@ -204,6 +204,46 @@ class TestRevokeCertificate:
 
 
 @pytest.mark.asyncio
+class TestHostCertificate:
+    """Tests for POST /certificates/host."""
+
+    async def test_host_cert_invalid_key_returns_400(
+        self, admin_client: AsyncClient, admin_token: str
+    ):
+        """An invalid host public key must return 400."""
+        from unittest.mock import AsyncMock, patch
+
+        with patch(
+            "bastion_admin.routers.certificates.issue_host_certificate",
+            new_callable=AsyncMock,
+            side_effect=ValueError("Invalid key"),
+        ):
+            response = await admin_client.post(
+                "/certificates/host",
+                json={
+                    "hostname": "web01.example.com",
+                    "host_public_key": "not-a-valid-key",
+                },
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+        assert response.status_code == 400
+
+    async def test_host_cert_non_admin_returns_403(
+        self, admin_client: AsyncClient, user_token: str
+    ):
+        """A non-admin must receive 403 when requesting a host certificate."""
+        response = await admin_client.post(
+            "/certificates/host",
+            json={
+                "hostname": "web01.example.com",
+                "host_public_key": "ssh-ed25519 AAAA test",
+            },
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+        assert response.status_code == 403
+
+
+@pytest.mark.asyncio
 class TestAuditLog:
     """Tests for GET /audit/."""
 
