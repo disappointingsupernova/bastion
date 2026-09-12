@@ -296,14 +296,17 @@ async def issue_host_certificate(
     hours = validity_hours or (settings.ssh_cert_validity_hours * 24)  # default 8 days for hosts
     serial = await _next_serial(db)
 
+    # Validate the hostname strictly before passing it to ssh-keygen.
+    # Only allow characters valid in a DNS hostname or IP address.
+    _HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9.\-]{0,252}[a-zA-Z0-9]$|^[a-zA-Z0-9]$")
+    if not _HOSTNAME_RE.match(server_hostname):
+        raise ValueError(
+            f"Invalid hostname {server_hostname!r} for host certificate — "
+            "only alphanumeric characters, hyphens, and dots are permitted."
+        )
     # key_id is built from serial only — no user input
     key_id = f"bastion-host-{serial}"
-    # Principals for a host cert are the hostnames/IPs the cert is valid for
     principal = server_hostname
-    if not _PRINCIPAL_RE.match(principal.replace(".", "").replace("-", "")) and not all(
-        c.isalnum() or c in ".-_" for c in principal
-    ):
-        raise ValueError(f"Invalid hostname {principal!r} for host certificate")
 
     with tempfile.TemporaryDirectory(prefix="bastion-hostcert-") as tmpdir:
         tmp = Path(tmpdir)
