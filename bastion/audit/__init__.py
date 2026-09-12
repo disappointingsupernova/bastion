@@ -78,6 +78,9 @@ def _compute_integrity_hash(entry: AuditLog, secret_key: str, previous_hash: str
 async def _get_previous_hash(db: AsyncSession) -> str | None:
     """Return the integrity_hash of the most recently inserted audit log entry.
 
+    Uses SELECT FOR UPDATE to serialise concurrent writers in HA deployments,
+    preventing two writers from reading the same previous hash simultaneously
+    and breaking the chain ordering guarantee.
     Orders by seq (monotonic autoincrement) for reliable insertion-order
     chaining even when multiple entries share the same created_at timestamp.
     """
@@ -86,6 +89,7 @@ async def _get_previous_hash(db: AsyncSession) -> str | None:
         .where(AuditLog.integrity_hash.is_not(None))
         .order_by(AuditLog.seq.desc())
         .limit(1)
+        .with_for_update()
     )
     return result.scalar_one_or_none()
 
