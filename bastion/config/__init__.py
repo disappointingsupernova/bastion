@@ -72,7 +72,7 @@ class Settings(BaseSettings):
         if len(v.encode()) < 32:
             raise ValueError(
                 "SECRET_KEY must be at least 32 bytes — "
-                "generate one with: python3 -c \"import secrets; print(secrets.token_hex(64))\""
+                'generate one with: python3 -c "import secrets; print(secrets.token_hex(64))"'
             )
         return v
 

@@ -90,7 +90,9 @@ class TestBeginRegistration:
 
     def test_returns_options_and_state_token(self):
         """begin_registration must return a (options_dict, state_token) tuple."""
-        options, state_token = begin_registration("user-id-123", "alice", "a-secret-key-that-is-long-enough")
+        options, state_token = begin_registration(
+            "user-id-123", "alice", "a-secret-key-that-is-long-enough"
+        )
         assert isinstance(options, dict)
         assert isinstance(state_token, str)
         assert len(state_token) > 0

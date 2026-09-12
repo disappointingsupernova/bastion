@@ -17,7 +17,10 @@ class TestFido2Endpoints:
     ):
         """POST /auth/fido2/register/begin must return options dict and state_token."""
         with patch("bastion.fido2.begin_registration") as mock_begin:
-            mock_begin.return_value = ({"challenge": "abc123", "rp": {"id": "bastion"}}, "state-token-xyz")
+            mock_begin.return_value = (
+                {"challenge": "abc123", "rp": {"id": "bastion"}},
+                "state-token-xyz",
+            )
             response = await api_client.post(
                 "/auth/fido2/register/begin",
                 headers={"Authorization": f"Bearer {user_token}"},

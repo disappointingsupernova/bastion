@@ -157,9 +157,7 @@ async def begin_authentication(
     server = _server()
     # Pass existing credentials so the authenticator receives allowCredentials
     # guidance on which credential to use.
-    fido2_creds = [
-        {"type": "public-key", "id": bytes.fromhex(c["credential_id"])} for c in creds
-    ]
+    fido2_creds = [{"type": "public-key", "id": bytes.fromhex(c["credential_id"])} for c in creds]
     options, state = server.authenticate_begin(fido2_creds, user_verification="preferred")  # type: ignore[arg-type]
 
     state_token = jwt.encode(

@@ -385,7 +385,9 @@ async def _rebuild_krl(db: AsyncSession) -> None:
 
     import tempfile
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".serials", delete=True, dir=krl_path.parent) as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".serials", delete=True, dir=krl_path.parent
+    ) as f:
         f.write("\n".join(f"serial:{s}" for s in serials))
         f.flush()
         serial_file = f.name

@@ -175,7 +175,9 @@ async def login(
         else:
             # Run a dummy password hash to equalise timing for non-existent usernames,
             # preventing user enumeration via response time differences.
-            verify_password(body.password, "$2b$12$dummy.hash.to.equalise.timing.xxxxxxxxxxxxxxxxxxxxxxxxx")
+            verify_password(
+                body.password, "$2b$12$dummy.hash.to.equalise.timing.xxxxxxxxxxxxxxxxxxxxxxxxx"
+            )
         await audit(
             db,
             "auth.login",
@@ -449,7 +451,9 @@ async def fido2_register_begin(
     from bastion.fido2 import begin_registration
 
     settings = get_settings()
-    options, state_token = begin_registration(current_user.id, current_user.username, settings.secret_key)
+    options, state_token = begin_registration(
+        current_user.id, current_user.username, settings.secret_key
+    )
     return Fido2RegisterBeginResponse(options=options, state_token=state_token)
 
 
@@ -463,7 +467,9 @@ async def fido2_register_complete(
     from bastion.fido2 import complete_registration
 
     settings = get_settings()
-    await complete_registration(db, current_user, body.credential, settings.secret_key, body.state_token)
+    await complete_registration(
+        db, current_user, body.credential, settings.secret_key, body.state_token
+    )
     await audit(db, "auth.fido2.register", success=True, user_id=current_user.id)
     log.info("FIDO2 credential registered", user_id=current_user.id)
 
