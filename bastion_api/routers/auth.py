@@ -172,6 +172,10 @@ async def login(
                 )
             await db.flush()
             await evaluate_login(db, user, ip, success=False)
+        else:
+            # Run a dummy password hash to equalise timing for non-existent usernames,
+            # preventing user enumeration via response time differences.
+            verify_password(body.password, "$2b$12$dummy.hash.to.equalise.timing.xxxxxxxxxxxxxxxxxxxxxxxxx")
         await audit(
             db,
             "auth.login",
