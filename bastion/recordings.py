@@ -90,24 +90,26 @@ def admin_key_fingerprint(admin_user_id: str, master_key: str) -> str:
 def decrypt_recording(encrypted_path: Path, age_identity_content: str) -> bytes:
     """Decrypt an age-encrypted recording using the provided identity.
 
-    The identity is written to a temporary file and deleted immediately after use.
+    The identity is written to a temporary file with delete=True so the OS
+    removes it automatically when the file is closed, even if the process
+    crashes. The file is restricted to mode 0600 before use.
     Returns the plaintext recording bytes.
     """
     with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".key", delete=False, prefix="bastion-dec-"
+        mode="w", suffix=".key", delete=True, prefix="bastion-dec-"
     ) as f:
         f.write(age_identity_content)
+        f.flush()
         identity_path = Path(f.name)
-
-    try:
         identity_path.chmod(0o600)
         result = subprocess.run(
             ["age", "--decrypt", "--identity", str(identity_path), str(encrypted_path)],
             capture_output=True,
             timeout=60,
         )
-        if result.returncode != 0:
-            raise RuntimeError(f"age decryption failed: {result.stderr.decode(errors='replace')}")
-        return result.stdout
-    finally:
-        identity_path.unlink(missing_ok=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"age decryption failed for recording {encrypted_path.name!r}: "
+            f"{result.stderr.decode(errors='replace')}"
+        )
+    return result.stdout
