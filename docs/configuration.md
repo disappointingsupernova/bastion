@@ -64,7 +64,7 @@ These should not need to be changed in normal operation.
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `60` | Access token lifetime in minutes. |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Refresh token lifetime in days. |
 
-The JWT signing algorithm is fixed to `HS256` and cannot be changed via configuration.
+The JWT signing algorithm is fixed to `HS256` and cannot be changed via configuration. Any attempt to set `JWT_ALGORITHM` to a different value is rejected at startup.
 
 ---
 

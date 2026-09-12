@@ -52,7 +52,7 @@ All passwords are hashed with bcrypt at cost factor 12. This is deliberately slo
 - Access tokens expire after 60 minutes (configurable)
 - Refresh tokens expire after 7 days (configurable)
 - Tokens are signed with HMAC-SHA256 (`HS256`) using the `SECRET_KEY`
-- The algorithm is fixed to `HS256` — it cannot be overridden via configuration
+- The algorithm is fixed to `HS256` — it cannot be overridden via configuration; the service rejects any other value at startup
 - The `SECRET_KEY` must be at least 32 bytes; the service rejects shorter values at startup
 
 ### MFA
@@ -63,7 +63,7 @@ Three MFA methods are supported:
 |---|---|
 | TOTP | Time-based one-time passwords (RFC 6238). Compatible with any authenticator app. The TOTP secret is encrypted at rest using Fernet. A 30-second window is allowed. |
 | Email | 6-digit codes with a 10-minute expiry. Codes are stored as HMAC-SHA256 hashes keyed to the user ID — the plaintext is never persisted. |
-| FIDO2 / WebAuthn | Hardware security key authentication (phishing-resistant). Credentials are stored encrypted in the database. Sign count validation detects cloned authenticators. |
+| FIDO2 / WebAuthn | Hardware security key authentication (phishing-resistant). Credentials are stored encrypted in the database. Sign count validation detects cloned authenticators. The registration challenge is bound to the response via a signed JWT state token — replay of any valid attestation response is rejected. |
 
 ### Account lockout
 
@@ -89,7 +89,7 @@ flowchart LR
 
 - Certificates are **never written to disk** on the bastion server
 - The CA private key is readable only by the `bastion` system user (mode `600`) and is encrypted with a passphrase set via `CA_KEY_PASSPHRASE`
-- The passphrase is passed to `ssh-keygen` at signing time — the key is never decrypted to disk
+- The passphrase is passed to `ssh-keygen` via stdin at signing time — the key is never decrypted to disk and `ssh-keygen` never hangs waiting for interactive input
 - Certificates expire after 8 hours — there is no permanent access
 - The KRL provides immediate revocation — a revoked certificate is rejected on the next connection attempt
 - Certificate principals are scoped to the specific remote username, not a wildcard
@@ -101,6 +101,8 @@ flowchart LR
 
 All secrets stored in the database (TOTP secrets, FIDO2 credentials, alert channel configuration) are encrypted using Fernet (AES-128-CBC + HMAC-SHA256). The encryption key is derived from `SECRET_KEY` using PBKDF2-HMAC-SHA256 with 600,000 iterations and a per-installation salt derived via HMAC-SHA256.
 
+Alert channel configuration (SMTP passwords, Slack webhook URLs, PagerDuty keys) is stored encrypted and decrypted at dispatch time — never stored or read as plaintext.
+
 The `SECRET_KEY` itself is stored only in `/opt/bastion/.env` (mode `600`, owned by `bastion`). A minimum length of 32 bytes is enforced at startup.
 
 ---
@@ -111,6 +113,7 @@ The `SECRET_KEY` itself is stored only in `/opt/bastion/.env` (mode `600`, owned
 - If `RECORDINGS_AGE_PUBLIC_KEY` is set, recordings are encrypted with `age` (X25519 asymmetric encryption) immediately on session completion
 - The plaintext recording file is overwritten with random bytes before deletion (best-effort; SSD wear-levelling means this is not guaranteed — the primary protection is age encryption)
 - The `age` private key is never stored on the bastion host — it is held offline by the operator
+- The age identity is passed to the playback API via the `X-Age-Identity` request header, not the request body, to prevent capture by request-body logging middleware
 - Even if the bastion host is fully compromised, recordings cannot be decrypted without the offline private key
 - All recording decryption events are logged in the `recording_decrypt_logs` table with the admin's key fingerprint
 - A master key (`RECORDINGS_MASTER_KEY`) can be configured to derive per-admin decrypt keys server-side, avoiding the need to transmit private keys over the API
@@ -138,7 +141,7 @@ Additionally:
 - The `bastion-users` group is required for SSH access
 - The KRL is distributed to all managed servers automatically after every revocation and on a 30-minute schedule
 
-All SSH connections from the bastion to remote servers use CA-based host verification (`@cert-authority`) rather than `known_hosts=None`, preventing MITM attacks on managed servers.
+All SSH connections from the bastion to remote servers use CA-based host verification (`@cert-authority`) rather than `known_hosts=None`, preventing MITM attacks on managed servers. This applies to provisioning, KRL distribution, and package update tasks. The dedicated `bastion_host_key` is used for SSH client authentication — the CA signing key is never used to authenticate SSH sessions.
 
 ---
 
@@ -259,9 +262,11 @@ See [anomaly.md](anomaly.md) for full details.
 | Replay attack | JWT expiry, short-lived certs, TOTP time window, FIDO2 sign count validation |
 | Data exfiltration via recordings | age asymmetric encryption, offline private key |
 | Denial of service | Rate limiting, Unix socket access control |
+| Session kill signal | The Redis kill channel message is signed with HMAC-SHA256 keyed to `SECRET_KEY`. Only the bastion service can publish valid kill signals; unsigned or replayed messages are rejected. |
 | MITM on managed servers | CA-based host verification on all outbound SSH connections |
-| Cloned FIDO2 authenticator | Sign count validation on every authentication |
-| Audit log tampering | HMAC-SHA256 integrity chain, tamper detection via `/audit/verify-chain` |
+| Cloned FIDO2 authenticator | Sign count validation on every authentication — counter regression triggers rejection and an error |
+| Audit log tampering | HMAC-SHA256 integrity chain, tamper detection via `/audit/verify-chain`. `SELECT FOR UPDATE` serialises concurrent HA writers to preserve chain ordering. |
+| LDAP sync lockout | Empty LDAP result sets (outage or misconfigured filter) do not trigger the suspension sweep. Admin accounts are never auto-suspended by LDAP sync. |
 
 ---
 
