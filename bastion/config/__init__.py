@@ -65,6 +65,17 @@ class Settings(BaseSettings):
             )
         return v
 
+    @field_validator("secret_key", mode="after")
+    @classmethod
+    def _validate_secret_key(cls, v: str) -> str:
+        """Reject SECRET_KEY values shorter than 32 bytes at startup."""
+        if len(v.encode()) < 32:
+            raise ValueError(
+                "SECRET_KEY must be at least 32 bytes — "
+                "generate one with: python3 -c \"import secrets; print(secrets.token_hex(64))\""
+            )
+        return v
+
     # ── SSH CA ────────────────────────────────────────────────────────────────
     ca_key_path: Path = Path("/opt/bastion/ca/bastion_ca")
     ca_key_passphrase: str | None = None  # Passphrase for the encrypted CA private key
