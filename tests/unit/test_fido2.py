@@ -88,15 +88,17 @@ class TestSaveCredentials:
 class TestBeginRegistration:
     """Tests for begin_registration."""
 
-    def test_returns_dict(self):
-        """begin_registration must return a dict (options)."""
-        result = begin_registration("user-id-123", "alice")
-        assert isinstance(result, dict)
+    def test_returns_options_and_state_token(self):
+        """begin_registration must return a (options_dict, state_token) tuple."""
+        options, state_token = begin_registration("user-id-123", "alice", "a-secret-key-that-is-long-enough")
+        assert isinstance(options, dict)
+        assert isinstance(state_token, str)
+        assert len(state_token) > 0
 
     def test_different_users_produce_different_options(self):
         """Different user IDs must produce different registration options."""
-        r1 = begin_registration("user-id-1", "alice")
-        r2 = begin_registration("user-id-2", "bob")
+        r1, _ = begin_registration("user-id-1", "alice", "a-secret-key-that-is-long-enough")
+        r2, _ = begin_registration("user-id-2", "bob", "a-secret-key-that-is-long-enough")
         assert r1 != r2
 
 

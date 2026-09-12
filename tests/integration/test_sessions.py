@@ -286,8 +286,10 @@ class TestAdminSessions:
         """Playback of a non-existent session must return 404."""
         response = await admin_client.post(
             "/sessions/nonexistent-id/playback",
-            json={"age_identity": "AGE-SECRET-KEY-1fake"},
-            headers={"Authorization": f"Bearer {admin_token}"},
+            headers={
+                "Authorization": f"Bearer {admin_token}",
+                "X-Age-Identity": "AGE-SECRET-KEY-1fake",
+            },
         )
         assert response.status_code == 404
 
@@ -316,8 +318,10 @@ class TestAdminSessions:
 
         response = await admin_client.post(
             f"/sessions/{session.id}/playback",
-            json={"age_identity": "AGE-SECRET-KEY-1fake"},
-            headers={"Authorization": f"Bearer {admin_token}"},
+            headers={
+                "Authorization": f"Bearer {admin_token}",
+                "X-Age-Identity": "AGE-SECRET-KEY-1fake",
+            },
         )
         assert response.status_code == 404
 

@@ -15,15 +15,17 @@ class TestFido2Endpoints:
     async def test_fido2_register_begin_returns_options(
         self, api_client: AsyncClient, user_token: str
     ):
-        """POST /auth/fido2/register/begin must return options dict."""
+        """POST /auth/fido2/register/begin must return options dict and state_token."""
         with patch("bastion.fido2.begin_registration") as mock_begin:
-            mock_begin.return_value = {"challenge": "abc123", "rp": {"id": "bastion"}}
+            mock_begin.return_value = ({"challenge": "abc123", "rp": {"id": "bastion"}}, "state-token-xyz")
             response = await api_client.post(
                 "/auth/fido2/register/begin",
                 headers={"Authorization": f"Bearer {user_token}"},
             )
         assert response.status_code == 200
-        assert "options" in response.json()
+        data = response.json()
+        assert "options" in data
+        assert "state_token" in data
 
     async def test_fido2_register_complete_calls_complete_registration(
         self, api_client: AsyncClient, user_token: str, db_session
@@ -32,7 +34,10 @@ class TestFido2Endpoints:
         with patch("bastion.fido2.complete_registration", new_callable=AsyncMock) as mock_complete:
             response = await api_client.post(
                 "/auth/fido2/register/complete",
-                json={"credential": {"clientDataJSON": "abc", "attestationObject": "def"}},
+                json={
+                    "state_token": "some-state-token",
+                    "credential": {"clientDataJSON": "abc", "attestationObject": "def"},
+                },
                 headers={"Authorization": f"Bearer {user_token}"},
             )
         assert response.status_code == 204

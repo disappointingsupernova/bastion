@@ -16,34 +16,66 @@ from bastion.session_kill import publish_kill_signal, subscribe_kill_signal
 class TestPublishKillSignal:
     """Tests for publish_kill_signal."""
 
-    async def test_publishes_to_correct_channel(self):
-        """publish_kill_signal must publish 'kill' to the session's kill channel."""
+    async def test_publishes_signed_message_to_correct_channel(self):
+        """publish_kill_signal must publish a signed message to the session's kill channel."""
+        from unittest.mock import MagicMock as MM
+
         mock_client = AsyncMock()
         mock_client.aclose = AsyncMock()
 
-        with patch("bastion.session_kill.aioredis.from_url", return_value=mock_client):
+        mock_settings = MM()
+        mock_settings.redis_url = "redis://localhost"
+        mock_settings.secret_key = "a-secret-key-that-is-long-enough-xx"
+
+        with (
+            patch("bastion.session_kill.aioredis.from_url", return_value=mock_client),
+            patch("bastion.session_kill.get_settings", return_value=mock_settings),
+        ):
             await publish_kill_signal("session-abc")
 
-        mock_client.publish.assert_called_once_with("bastion:session:kill:session-abc", "kill")
+        call_args = mock_client.publish.call_args
+        assert call_args[0][0] == "bastion:session:kill:session-abc"
+        message = call_args[0][1]
+        parts = message.split(":")
+        assert len(parts) == 3
+        assert parts[0] == "kill"
+        assert parts[1].isdigit()
+        assert len(parts[2]) == 64
 
     async def test_closes_client_after_publish(self):
         """publish_kill_signal must close the Redis client after publishing."""
+        from unittest.mock import MagicMock as MM
+
         mock_client = AsyncMock()
         mock_client.aclose = AsyncMock()
 
-        with patch("bastion.session_kill.aioredis.from_url", return_value=mock_client):
+        mock_settings = MM()
+        mock_settings.redis_url = "redis://localhost"
+        mock_settings.secret_key = "a-secret-key-that-is-long-enough-xx"
+
+        with (
+            patch("bastion.session_kill.aioredis.from_url", return_value=mock_client),
+            patch("bastion.session_kill.get_settings", return_value=mock_settings),
+        ):
             await publish_kill_signal("session-xyz")
 
         mock_client.aclose.assert_called_once()
 
     async def test_closes_client_on_publish_error(self):
         """publish_kill_signal must close the Redis client even if publish raises."""
+        from unittest.mock import MagicMock as MM
+
         mock_client = AsyncMock()
         mock_client.publish = AsyncMock(side_effect=RuntimeError("Redis down"))
         mock_client.aclose = AsyncMock()
 
+        mock_settings = MM()
+        mock_settings.redis_url = "redis://localhost"
+        mock_settings.secret_key = "a-secret-key-that-is-long-enough-xx"
+
         with (
             patch("bastion.session_kill.aioredis.from_url", return_value=mock_client),
+            patch("bastion.session_kill.get_settings", return_value=mock_settings),
             pytest.raises(RuntimeError),
         ):
             await publish_kill_signal("session-err")
@@ -55,8 +87,46 @@ class TestPublishKillSignal:
 class TestSubscribeKillSignal:
     """Tests for subscribe_kill_signal."""
 
-    async def test_yields_on_kill_message(self):
-        """subscribe_kill_signal must yield when a 'kill' message is received."""
+    async def test_yields_on_valid_signed_kill_message(self):
+        """subscribe_kill_signal must yield when a valid signed kill message is received."""
+        from unittest.mock import MagicMock as MM
+
+        from bastion.session_kill import _sign_kill_message
+
+        test_secret = "a-secret-key-that-is-long-enough-xx"
+        signed = _sign_kill_message("session-123", test_secret)
+        messages = [
+            {"type": "subscribe", "data": 1},
+            {"type": "message", "data": signed},
+        ]
+
+        mock_pubsub = AsyncMock()
+        mock_pubsub.subscribe = AsyncMock()
+        mock_pubsub.unsubscribe = AsyncMock()
+        mock_pubsub.listen = MagicMock(return_value=_async_iter(messages))
+
+        mock_client = AsyncMock()
+        mock_client.pubsub = MagicMock(return_value=mock_pubsub)
+        mock_client.aclose = AsyncMock()
+
+        mock_settings = MM()
+        mock_settings.redis_url = "redis://localhost"
+        mock_settings.secret_key = test_secret
+
+        with (
+            patch("bastion.session_kill.aioredis.from_url", return_value=mock_client),
+            patch("bastion.session_kill.get_settings", return_value=mock_settings),
+        ):
+            received = []
+            async for msg in subscribe_kill_signal("session-123"):
+                received.append(msg)
+
+        assert len(received) == 1
+
+    async def test_ignores_unsigned_kill_message(self):
+        """subscribe_kill_signal must ignore unsigned 'kill' messages."""
+        from unittest.mock import MagicMock as MM
+
         messages = [
             {"type": "subscribe", "data": 1},
             {"type": "message", "data": "kill"},
@@ -71,15 +141,24 @@ class TestSubscribeKillSignal:
         mock_client.pubsub = MagicMock(return_value=mock_pubsub)
         mock_client.aclose = AsyncMock()
 
-        with patch("bastion.session_kill.aioredis.from_url", return_value=mock_client):
+        mock_settings = MM()
+        mock_settings.redis_url = "redis://localhost"
+        mock_settings.secret_key = "a-secret-key-that-is-long-enough-xx"
+
+        with (
+            patch("bastion.session_kill.aioredis.from_url", return_value=mock_client),
+            patch("bastion.session_kill.get_settings", return_value=mock_settings),
+        ):
             received = []
-            async for msg in subscribe_kill_signal("session-123"):
+            async for msg in subscribe_kill_signal("session-456"):
                 received.append(msg)
 
-        assert len(received) == 1
+        assert received == []
 
     async def test_ignores_non_message_types(self):
         """subscribe_kill_signal must ignore subscribe/unsubscribe type messages."""
+        from unittest.mock import MagicMock as MM
+
         messages = [
             {"type": "subscribe", "data": 1},
             {"type": "psubscribe", "data": 1},
@@ -94,7 +173,14 @@ class TestSubscribeKillSignal:
         mock_client.pubsub = MagicMock(return_value=mock_pubsub)
         mock_client.aclose = AsyncMock()
 
-        with patch("bastion.session_kill.aioredis.from_url", return_value=mock_client):
+        mock_settings = MM()
+        mock_settings.redis_url = "redis://localhost"
+        mock_settings.secret_key = "a-secret-key-that-is-long-enough-xx"
+
+        with (
+            patch("bastion.session_kill.aioredis.from_url", return_value=mock_client),
+            patch("bastion.session_kill.get_settings", return_value=mock_settings),
+        ):
             received = []
             async for msg in subscribe_kill_signal("session-456"):
                 received.append(msg)
@@ -216,15 +302,13 @@ class TestDecryptRecording:
 
         assert result == b'{"version":2}\n[0.1,"o","hello"]'
 
-    def test_identity_file_deleted_after_use(self):
-        """The temporary identity file must be deleted after decryption."""
-        created_paths: list[Path] = []
-        original_unlink = Path.unlink
+    def test_identity_file_not_accessible_after_use(self):
+        """The temporary identity file must not be accessible after decryption completes.
 
-        def track_unlink(self, missing_ok=False):
-            created_paths.append(self)
-            original_unlink(self, missing_ok=missing_ok)
-
+        With delete=True on NamedTemporaryFile the OS removes the file on close,
+        so we verify the subprocess is called and the function returns successfully
+        without leaving any key material in the system temp directory.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             enc_path = Path(tmpdir) / "recording.cast.age"
             enc_path.write_bytes(b"fake")
@@ -233,13 +317,25 @@ class TestDecryptRecording:
             mock_result.returncode = 0
             mock_result.stdout = b"plaintext"
 
-            with (
-                patch("bastion.recordings.subprocess.run", return_value=mock_result),
-                patch.object(Path, "unlink", track_unlink),
-            ):
-                decrypt_recording(enc_path, "AGE-SECRET-KEY-1fake")
+            identity_paths_used: list[str] = []
 
-        assert len(created_paths) >= 1
+            original_run = __import__("subprocess").run
+
+            def capture_identity(args, **kwargs):
+                # Record the identity file path passed to age
+                if "--identity" in args:
+                    idx = args.index("--identity")
+                    identity_paths_used.append(args[idx + 1])
+                return mock_result
+
+            with patch("bastion.recordings.subprocess.run", side_effect=capture_identity):
+                result = decrypt_recording(enc_path, "AGE-SECRET-KEY-1fake")
+
+        assert result == b"plaintext"
+        # The identity file must have been passed to age
+        assert len(identity_paths_used) == 1
+        # The identity file must no longer exist after the call
+        assert not Path(identity_paths_used[0]).exists()
 
 
 # ── Async iterator helper ─────────────────────────────────────────────────────
