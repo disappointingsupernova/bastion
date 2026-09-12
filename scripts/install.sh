@@ -177,12 +177,17 @@ if [[ ! -f "$BASTION_ROOT/ca/bastion_ca" ]]; then
     # Generate a random CA key passphrase and store it in the .env
     CA_PASSPHRASE=$(python3 -c "import secrets; print(secrets.token_hex(32))")
     echo "CA_KEY_PASSPHRASE=${CA_PASSPHRASE}" >> "$BASTION_ROOT/.env"
-    sudo -u "$BASTION_USER" "$BASTION_ROOT/venv/bin/python" -c "
-import sys
+    # Pass the passphrase via an environment variable — never interpolate it
+    # into a script string, as future passphrase formats may contain special
+    # characters that would break out of the string literal.
+    BASTION_CA_PASSPHRASE="$CA_PASSPHRASE" sudo -u "$BASTION_USER" \
+        "$BASTION_ROOT/venv/bin/python" -c "
+import sys, os
 sys.path.insert(0, '/opt/bastion/app')
 from bastion.crypto.ca import generate_ca_keypair
 from pathlib import Path
-generate_ca_keypair(Path('/opt/bastion/ca/bastion_ca'), passphrase=b'${CA_PASSPHRASE}')
+passphrase = os.environ['BASTION_CA_PASSPHRASE'].encode()
+generate_ca_keypair(Path('/opt/bastion/ca/bastion_ca'), passphrase=passphrase)
 "
     log "CA keypair generated at $BASTION_ROOT/ca/bastion_ca (encrypted with passphrase)"
     log "IMPORTANT: Back up $BASTION_ROOT/ca/bastion_ca and the CA_KEY_PASSPHRASE securely."
