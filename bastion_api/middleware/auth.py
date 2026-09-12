@@ -12,7 +12,14 @@ from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-_PUBLIC_PATHS = {"/health", "/auth/login", "/auth/mfa/verify", "/auth/refresh"}
+_PUBLIC_PATHS = {
+    "/health",
+    "/auth/login",
+    "/auth/mfa/verify",
+    "/auth/refresh",
+    "/auth/fido2/authenticate/begin",
+    "/auth/fido2/authenticate/complete",
+}
 
 
 class RequireAuthMiddleware(BaseHTTPMiddleware):
