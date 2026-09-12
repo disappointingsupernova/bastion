@@ -128,20 +128,9 @@ async def login(
     )
     user = result.scalar_one_or_none()
 
-    # ── IP allowlist check ────────────────────────────────────────────────────
-    if user and not check_ip_allowed(ip, user.ip_allowlist):
-        await audit(
-            db,
-            "auth.login",
-            success=False,
-            user_id=user.id,
-            ip_address=ip,
-            detail={"reason": "IP not in allowlist"},
-        )
-        # Return the same error as invalid credentials to avoid user enumeration
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
-
     # ── Account lockout check ─────────────────────────────────────────────────
+    # Checked before IP allowlist so both blocked and allowed IPs receive the
+    # same 429 response for locked accounts, preventing lockout state enumeration.
     if user and user.locked_until and user.locked_until > datetime.now(tz=UTC):
         await audit(
             db,
@@ -155,6 +144,19 @@ async def login(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Account is temporarily locked due to too many failed login attempts.",
         )
+
+    # ── IP allowlist check ────────────────────────────────────────────────────
+    if user and not check_ip_allowed(ip, user.ip_allowlist):
+        await audit(
+            db,
+            "auth.login",
+            success=False,
+            user_id=user.id,
+            ip_address=ip,
+            detail={"reason": "IP not in allowlist"},
+        )
+        # Return the same error as invalid credentials to avoid user enumeration
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
     if user is None or not verify_password(body.password, user.hashed_password):
         if user:
