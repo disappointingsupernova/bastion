@@ -149,12 +149,17 @@ async def issue_certificate(
 
         cert_file = tmp / "user-cert.pub"
 
-        # All arguments are passed as a list — no shell interpolation
+        # All arguments are passed as a list — no shell interpolation.
+        # The CA key passphrase is passed via stdin using -P - to avoid
+        # interactive prompts when the key is passphrase-protected.
+        passphrase = settings.ca_key_passphrase or ""
         result = subprocess.run(
             [
                 "ssh-keygen",
                 "-s",
                 str(settings.ca_key_path),
+                "-P",
+                "-",
                 "-I",
                 key_id,
                 "-n",
@@ -165,8 +170,9 @@ async def issue_certificate(
                 str(serial),
                 str(pub_key_file),
             ],
+            input=passphrase.encode(),
             capture_output=True,
-            text=True,
+            text=False,
             timeout=10,
         )
 
@@ -174,9 +180,12 @@ async def issue_certificate(
             log.error(
                 "Certificate issuance failed",
                 user_id=user_id,
-                stderr=result.stderr,
+                stderr=result.stderr.decode(errors="replace"),
             )
-            raise RuntimeError(f"ssh-keygen failed: {result.stderr}")
+            raise RuntimeError(
+                f"ssh-keygen failed whilst issuing certificate for user {user_id!r}: "
+                f"{result.stderr.decode(errors='replace')}"
+            )
 
         cert_bytes = cert_file.read_bytes()
 
@@ -302,11 +311,14 @@ async def issue_host_certificate(
         pub_key_file.write_bytes(host_public_key_bytes)
         pub_key_file.chmod(0o600)
 
+        passphrase = settings.ca_key_passphrase or ""
         result = subprocess.run(
             [
                 "ssh-keygen",
                 "-s",
                 str(settings.ca_key_path),
+                "-P",
+                "-",
                 "-I",
                 key_id,
                 "-h",  # host certificate flag
@@ -318,16 +330,22 @@ async def issue_host_certificate(
                 str(serial),
                 str(pub_key_file),
             ],
+            input=passphrase.encode(),
             capture_output=True,
-            text=True,
+            text=False,
             timeout=10,
         )
 
         if result.returncode != 0:
             log.error(
-                "Host certificate issuance failed", hostname=server_hostname, stderr=result.stderr
+                "Host certificate issuance failed",
+                hostname=server_hostname,
+                stderr=result.stderr.decode(errors="replace"),
             )
-            raise RuntimeError(f"ssh-keygen failed: {result.stderr}")
+            raise RuntimeError(
+                f"ssh-keygen failed whilst issuing host certificate for {server_hostname!r}: "
+                f"{result.stderr.decode(errors='replace')}"
+            )
 
         cert_file = pub_key_file.with_name("host-cert.pub")
         cert_bytes = cert_file.read_bytes()
