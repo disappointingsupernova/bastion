@@ -37,11 +37,18 @@ async def _check_all_servers() -> None:
 
     for server in servers:
         try:
+            from bastion.config import get_settings
+
+            settings = get_settings()
+            ca_pub_key_text = settings.ca_key_path.with_suffix(".pub").read_text().strip()
+            known_hosts = asyncssh.SSHKnownHosts(f"@cert-authority * {ca_pub_key_text}\n")
+
             async with asyncssh.connect(
                 server.hostname,
                 port=server.ssh_port,
                 username="bastion",
-                known_hosts=None,
+                client_keys=[str(settings.ca_key_path.parent / "bastion_host_key")],
+                known_hosts=known_hosts,
             ) as conn:
                 updates = await get_available_updates(conn, server.os_family.value)
 
