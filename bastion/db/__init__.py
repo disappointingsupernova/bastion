@@ -34,7 +34,7 @@ def get_engine():
         connect_args = {"check_same_thread": False} if settings.is_sqlite else {}
         _engine = create_async_engine(
             settings.db_url,
-            echo=settings.environment == "development",
+            echo=False,  # Never echo SQL — queries may contain hashed passwords or encrypted secrets
             connect_args=connect_args,
             pool_pre_ping=True,
         )
