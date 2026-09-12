@@ -105,14 +105,14 @@ async def health_dashboard(
         try:
             db_path = settings.bastion_root / "data" / "bastion.db"
             db_size = db_path.stat().st_size if db_path.exists() else None
-        except OSError:
-            pass
+        except OSError as exc:
+            log.debug("Could not read SQLite database size", error=str(exc))
     else:
         try:
             result = await db.execute(text("SELECT pg_database_size(current_database())"))
             db_size = result.scalar_one()
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Could not query PostgreSQL database size", error=str(exc))
 
     # Recording storage
     recording_bytes: int | None = None
@@ -120,8 +120,8 @@ async def health_dashboard(
         rec_path = settings.recordings_path
         if rec_path.exists():
             recording_bytes = sum(f.stat().st_size for f in rec_path.rglob("*") if f.is_file())
-    except OSError:
-        pass
+    except OSError as exc:
+        log.debug("Could not calculate recording storage size", error=str(exc))
 
     # Cluster nodes
     nodes_result = await db.execute(select(BastionNode).order_by(BastionNode.node_id))

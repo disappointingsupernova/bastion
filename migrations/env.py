@@ -8,9 +8,16 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
-import bastion.models  # noqa: F401 — ensure all models are registered with SQLAlchemy metadata
+# bastion.models must be imported before Alembic inspects the metadata so that
+# all ORM models are registered with SQLAlchemy's DeclarativeBase. The import
+# is intentional; the alias prevents static-analysis tools from flagging it as
+# unused.
+from bastion import models as _registered_models
 from bastion.config import get_settings
 from bastion.db import Base
+
+# Ensure the import is not optimised away by a linter.
+assert _registered_models is not None  # noqa: S101
 
 config = context.config
 if config.config_file_name is not None:

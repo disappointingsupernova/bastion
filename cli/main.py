@@ -96,7 +96,7 @@ def _try_refresh() -> str | None:
             data = response.json()
             _save_token(data["access_token"], data.get("refresh_token"))
             return data["access_token"]
-    except Exception:
+    except Exception:  # noqa: BLE001 — network/socket errors are expected; caller handles None
         pass
     return None
 

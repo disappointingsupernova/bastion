@@ -178,9 +178,8 @@ class Settings(BaseSettings):
         return self.ha_mode
 
 
-_settings: Settings | None = None
-
-
+# Remove the unused module-level _settings variable — the singleton is
+# managed entirely by the lru_cache on get_settings().
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Return the cached Settings instance.

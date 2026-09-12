@@ -174,8 +174,11 @@ class BastionSSHSession(asyncssh.SSHServerSession):
                         dest=f"{dest_host}:{dest_port}",
                     )
                     return False
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as exc:
+                log.debug(
+                    "Could not parse session_policy for port-forwarding check",
+                    error=str(exc),
+                )
         return True
 
     def pty_requested(  # type: ignore[override]
@@ -211,8 +214,6 @@ class BastionSSHSession(asyncssh.SSHServerSession):
         Also listens for admin kill signals via Redis pub/sub and terminates
         the connection if one is received.
         """
-        import asyncio
-
         from bastion.session_kill import subscribe_kill_signal
 
         async def _watch_for_kill() -> None:

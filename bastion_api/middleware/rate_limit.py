@@ -10,6 +10,10 @@ from __future__ import annotations
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from bastion.logging import get_logger
+
+_log = get_logger(__name__)
+
 
 def make_rate_limit_middleware(limiter):
     """Return a BaseHTTPMiddleware subclass bound to the given slowapi Limiter."""
@@ -33,8 +37,8 @@ def make_rate_limit_middleware(limiter):
                         remaining = max(0, amount - int(current))
                         response.headers["X-RateLimit-Limit"] = str(amount)
                         response.headers["X-RateLimit-Remaining"] = str(remaining)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log.debug("Could not inject rate-limit headers", error=str(exc))
             return response
 
     return RateLimitHeadersMiddleware

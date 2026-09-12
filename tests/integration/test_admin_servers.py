@@ -128,9 +128,9 @@ class TestAccessGrants:
         regular_user,
     ):
         """An admin must be able to grant a user access to a server."""
-        url = f"/servers/{test_server.id}/access"  # noqa: S105
+        access_url = f"/servers/{test_server.id}/access"
         response = await admin_client.post(
-            url,
+            access_url,
             json={"user_id": regular_user.id, "allow_sudo": False},
             headers={"Authorization": f"Bearer {admin_token}"},
         )

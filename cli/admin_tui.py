@@ -21,6 +21,9 @@ from textual.widgets import (
     TabPane,
 )
 
+from bastion.logging import get_logger
+
+_log = get_logger(__name__)
 _ADMIN_SOCKET = Path("/opt/bastion/run/bastion-admin.sock")
 _TOKEN_FILE = Path.home() / ".bastion" / "admin-token"
 
@@ -108,8 +111,8 @@ class UsersPane(Static):
                     u["status"],
                     u.get("mfa_method") or "—",
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("Admin TUI users pane refresh failed", error=str(exc))
 
 
 class ServersPane(Static):
@@ -141,8 +144,8 @@ class ServersPane(Static):
                     "✓" if s["hardening_applied"] else "✗",
                     last_seen,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("Admin TUI servers pane refresh failed", error=str(exc))
 
 
 class AccessRequestsPane(Static):
@@ -173,8 +176,8 @@ class AccessRequestsPane(Static):
                     "✓" if r["allow_sudo"] else "—",
                     r["reason"][:40],
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("Admin TUI access-requests pane refresh failed", error=str(exc))
 
 
 class AuditPane(Static):
@@ -204,8 +207,8 @@ class AuditPane(Static):
                     (e.get("user_id") or "—")[:8],
                     "✓" if e["success"] else "✗",
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("Admin TUI audit pane refresh failed", error=str(exc))
 
 
 class BastionAdminTUI(App):

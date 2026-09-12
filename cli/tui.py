@@ -21,6 +21,9 @@ from textual.widgets import (
     TabPane,
 )
 
+from bastion.logging import get_logger
+
+_log = get_logger(__name__)
 _API_SOCKET = Path("/opt/bastion/run/bastion-api.sock")
 _TOKEN_FILE = Path.home() / ".bastion" / "token"
 
@@ -203,8 +206,8 @@ class SessionsPane(Static):
                     duration,
                     "✓" if s["recording_available"] else "—",
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("TUI sessions pane refresh failed", error=str(exc))
 
 
 class ConnectPane(Static):
@@ -275,8 +278,8 @@ class BastionTUI(App):
         try:
             pane = self.query_one(SessionsPane)
             pane._refresh()
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("TUI action_refresh failed", error=str(exc))
 
     def action_logout(self) -> None:
         """Delete the stored token and show the login screen."""
